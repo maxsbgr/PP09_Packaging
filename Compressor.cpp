@@ -9,8 +9,13 @@
 #include "Shlwapi.h"
 
 #include "lz4.h"
+#include "wfLZ.h"
 
 using namespace std;
+
+#ifndef NULL
+	#define NULL 0
+#endif
 
 struct lz4chunkParameters
 {
@@ -197,8 +202,75 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 
 }
 
+void* Malloc(const size_t size)
+{
+	return malloc(size);
+	return malloc((size + 3)&(~0x3)); // assume sane allocators pad allocations to four bytes
+}
+
+// Source: https://github.com/ShaneYCG/wflz/blob/master/example/main.c
+// with slight modifications
 void compressWithWFLZ(vector<string> filepaths, string parentpath) {
-	// TO DO
+	const char* in;
+
+	uint32_t compressedSize, uncompressedSize;
+	uint8_t* uncompressed;
+	uint8_t* workMem;
+	uint8_t* compressed;
+	errno_t err;
+
+	for (int i = 0; i < filepaths.size(); i++) {
+		{
+			in = filepaths[i].c_str();
+			FILE* fh;
+			err = fopen_s(&fh, in, "rb");
+			//TODO: Print out the file size
+			if (fh == NULL)
+			{
+				cout << "Could not open file " << in << endl;
+				return;
+			}
+			fseek(fh, 0, SEEK_END);
+			uncompressedSize = (uint32_t)ftell(fh);
+			uncompressed = (uint8_t*)Malloc(uncompressedSize);
+			if (uncompressed == NULL)
+			{
+				fclose(fh);
+				cout << "Error: Allocation failed." << endl;
+				return;
+			}
+			fseek(fh, 0, SEEK_SET);
+			if (fread(uncompressed, 1, uncompressedSize, fh) != uncompressedSize)
+			{
+				fclose(fh);
+				cout << "Error: File read failed." << endl;
+				return;
+			}
+			fclose(fh);
+		}
+		workMem = (uint8_t*)Malloc(wfLZ_GetWorkMemSize());
+		if (workMem == NULL)
+		{
+			cout << "Error: Allocation failed." << endl;
+			return;
+		}
+
+		compressed = (uint8_t*)Malloc(wfLZ_GetMaxCompressedSize(uncompressedSize));
+		compressedSize = wfLZ_CompressFast(uncompressed, uncompressedSize, compressed, workMem, 0);
+		//TODO: Create the files analog to compressWithLZ4()
+
+		//TODO: This line gives an error at empty files
+		wfLZ_Decompress(compressed, uncompressed);
+
+		free(workMem);
+		free(compressed);
+
+		free(uncompressed);
+
+		printf("Compression Ratio: %.2f\n", ((float)compressedSize) / ((float)uncompressedSize));
+	}
+	// TO DO: write file into zip folder,
+	cout << "Compression complete!" << endl;
 }
 
 void compressWithPITHY(vector<string> filepaths, string parentpath) {
