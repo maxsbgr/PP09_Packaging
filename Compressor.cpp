@@ -209,7 +209,7 @@ void* Malloc(const size_t size)
 }
 
 // Source: https://github.com/ShaneYCG/wflz/blob/master/example/main.c
-// with slight modifications
+// with modifications
 void compressWithWFLZ(vector<string> filepaths, string parentpath) {
 	const char* in;
 
@@ -219,47 +219,72 @@ void compressWithWFLZ(vector<string> filepaths, string parentpath) {
 	uint8_t* compressed;
 	errno_t err;
 
-	for (int i = 0; i < filepaths.size(); i++) {
+	for (unsigned int i = 0; i < filepaths.size(); i++) {
 		{
 			in = filepaths[i].c_str();
 			FILE* fh;
 			err = fopen_s(&fh, in, "rb");
-			//TODO: Print out the file size
 			if (fh == NULL)
 			{
 				cout << "Could not open file " << in << endl;
-				return;
+				continue;
 			}
 			fseek(fh, 0, SEEK_END);
 			uncompressedSize = (uint32_t)ftell(fh);
+			if (uncompressedSize == 0) {
+				cout << "Empty file " << i << endl << endl;
+				continue;
+			}
+			cout << "Uncompressed size of file " << i << ": " << uncompressedSize << endl;
 			uncompressed = (uint8_t*)Malloc(uncompressedSize);
 			if (uncompressed == NULL)
 			{
 				fclose(fh);
-				cout << "Error: Allocation failed." << endl;
-				return;
+				cout << "Error: Allocation failed.\n" << endl;
+				continue;
 			}
 			fseek(fh, 0, SEEK_SET);
 			if (fread(uncompressed, 1, uncompressedSize, fh) != uncompressedSize)
 			{
 				fclose(fh);
-				cout << "Error: File read failed." << endl;
-				return;
+				cout << "Error: File read failed.\n" << endl;
+				continue;
 			}
 			fclose(fh);
 		}
 		workMem = (uint8_t*)Malloc(wfLZ_GetWorkMemSize());
 		if (workMem == NULL)
 		{
-			cout << "Error: Allocation failed." << endl;
-			return;
+			cout << "Error: Allocation failed.\n" << endl;
+			continue;
 		}
 
 		compressed = (uint8_t*)Malloc(wfLZ_GetMaxCompressedSize(uncompressedSize));
 		compressedSize = wfLZ_CompressFast(uncompressed, uncompressedSize, compressed, workMem, 0);
-		//TODO: Create the files analog to compressWithLZ4()
 
-		//TODO: This line gives an error at empty files
+		ofstream outputfile;
+		string outputfilename;
+		outputfilename = filepaths[i];
+
+		outputfilename.substr();
+
+		string filename;
+		const size_t last_slash_idx = outputfilename.rfind('\\');
+		if (std::string::npos != last_slash_idx) {
+			filename = outputfilename.substr(last_slash_idx + 1, outputfilename.length());
+		}
+
+		filename.append("_compressed.wfLZ");
+
+		outputfile.open(parentpath + "\\" + filename, std::ios::binary | std::ios::ate);
+		const char* temp = (char*) compressed;
+		outputfile.write(temp, compressedSize);
+
+		cout << "file " << filename << " compressed." << endl;
+		cout << "Compressed size of file " << i << ": " << compressedSize << endl;
+
+		outputfile.close();
+
 		wfLZ_Decompress(compressed, uncompressed);
 
 		free(workMem);
@@ -267,7 +292,7 @@ void compressWithWFLZ(vector<string> filepaths, string parentpath) {
 
 		free(uncompressed);
 
-		printf("Compression Ratio: %.2f\n", ((float)compressedSize) / ((float)uncompressedSize));
+		printf("Compression Ratio: %.2f\n\n", ((float)compressedSize) / ((float)uncompressedSize));
 	}
 	// TO DO: write file into zip folder,
 	cout << "Compression complete!" << endl;
@@ -300,6 +325,7 @@ void compressWithSNAPPY(vector<string> filepaths, string parentpath) {
 
 		mode = getchar();
 
+		cout << endl;
 		switch (mode) {
 		case '1':
 			cout << "Compressing files with lz4..." << endl;
