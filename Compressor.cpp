@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <ShlObj.h>
 #include <windows.h>
+#include <ctime>
 #include <string>
 #include <vector>
 #include <iterator>
@@ -10,12 +11,18 @@
 
 #include "lz4.h"
 #include "wfLZ.h"
+#include "pithy.h"
 
 using namespace std;
 
 #ifndef NULL
 	#define NULL 0
 #endif
+
+#define _SECOND ((int64) 10000000)
+#define _MINUTE (60 * _SECOND)
+#define _HOUR   (60 * _MINUTE)
+#define _DAY    (24 * _HOUR)
 
 struct lz4chunkParameters
 {
@@ -103,103 +110,178 @@ vector<string> selectFolder(char *path) {
 
 void compressWithLZ4(vector<string> filepaths, string parentpath) {
 	
-	for (int i = 0; i < filepaths.size(); i++) {
-		ifstream file;
-		file.open(filepaths[i]);
-		file.seekg(0, file.end);
-		streamsize size = file.tellg();
-		file.seekg (0, file.beg);
-    	cout << "Size of file " << i << ": " << size << endl;
-		vector<char> inbuffer;
-		inbuffer.reserve(size);
-		inbuffer.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+	for (unsigned int i = 0; i < filepaths.size(); i++) {
+	
+		FILE* uncompFile = NULL;
+		FILE* compFile = NULL;
+		FILE* decompFile = NULL;
+		const int chunkSize = 65536;
 
-		if (!inbuffer.empty())	{
-			// file successfully read
-			const int chunkSize = 32768;
-			
-			int num_read = 0;
-			unsigned long total_read = 0, total_wrote = 0;
-			int numberOfChunks = 0;
-
-			/* Alloc */
-			struct lz4chunkParameters* chunkP = (struct lz4chunkParameters*) malloc(((size / (size_t)chunkSize)+1) * sizeof(struct lz4chunkParameters));
-			numberOfChunks = (int) ((int)size / chunkSize) + 1;
-			int maxCompressedChunkSize = LZ4_compressBound(chunkSize);
-			int compressedBuffSize = numberOfChunks * maxCompressedChunkSize;
-			
-			cout << "number of chunks " << i << ": " << numberOfChunks << endl;
-
-			vector<char> outbuffer(compressedBuffSize);
-
-			/* Init chunks data */
-			{
-				int i;
-				size_t remaining = size;
-				char* in = &inbuffer[0];
-				char* out = &outbuffer[0];
-
-				for (i=0; i<numberOfChunks; i++)
-				{
-					chunkP[i].id = i;
-					chunkP[i].origBuffer = in; in += chunkSize;
-					if ((int)remaining > chunkSize) { chunkP[i].origSize = chunkSize; remaining -= chunkSize; } else { chunkP[i].origSize = (int)remaining; remaining = 0; }
-					chunkP[i].compressedBuffer = out; out += maxCompressedChunkSize;
-					chunkP[i].compressedSize = 0;
-				}
-			}
-
-			// Compression
-			for (int i=0; i < size; i++) outbuffer[i]=(char)i;     /* warmimg up memory */
-
-			for (int chunk=0; chunk<numberOfChunks; chunk++) {
-
-				chunkP[chunk].compressedSize = LZ4_compress_fast(chunkP[chunk].origBuffer, chunkP[chunk].compressedBuffer, chunkP[chunk].origSize, maxCompressedChunkSize, 2);
-
-			}
-			int compressedFileSize = 0;
-			for (int i=0; i<numberOfChunks; i++) {
-				compressedFileSize += chunkP[i].compressedSize;
-			}
-
-			ofstream outputfile;
-			string outputfilename;
-			outputfilename = filepaths[i];
-
-			outputfilename.substr();
-
-			//PathRemoveFileSpec(outputfilename);
-
-			
+		const char* uncompFileName = filepaths[i].c_str();
 			string filename;
-			const size_t last_slash_idx = outputfilename.rfind('\\');
+			const size_t last_slash_idx = filepaths[i].rfind('\\');
 			if (std::string::npos != last_slash_idx) {
-			    filename = outputfilename.substr(last_slash_idx+1, outputfilename.length());
+				filename = filepaths[i].substr(last_slash_idx + 1, filepaths[i].length());
 			}
-
+			string uncompressedFileName = filename;
 			filename.append("_compressed.lz4");
+			string compStr = parentpath + "\\" + filename;
+		const char* compFileName = compStr.c_str();
 
-			outputfile.open(parentpath+"\\"+filename, std::ios::binary | std::ios::ate);
-			outputfile.write(outbuffer.data(), compressedFileSize);
+			string decompStr = parentpath + "\\" + uncompressedFileName;
+		const char* decompFileName = decompStr.c_str();
+		
+		char* inbuffer;
+		char* outbuffer;
+		int num_read = 0;
+		unsigned long total_read = 0, total_wrote = 0;
+		int numberOfChunks = 0;
 
-			cout << "file " << filename << " compressed." << endl;
+		fopen_s(&uncompFile, uncompFileName, "rb");
+		fopen_s(&compFile, compFileName, "wb");
+		
+		if (!compFile || !uncompFile) {
+			printf("Couldn't open file!\n");
+			continue;
+		}
+		struct stat buf;
+		if (stat(uncompFileName, &buf) == 0) {
+		//	printf("Groesse der Datei: %i\n", buf.st_size);
+		}
+		int fileSize = buf.st_size;
+		/* Alloc */
+		struct lz4chunkParameters* chunkP;
+		chunkP = (struct lz4chunkParameters*) malloc(((fileSize / (size_t)chunkSize) + 1) * sizeof(struct lz4chunkParameters));
+		inbuffer = (char*)malloc((size_t)fileSize);
+		numberOfChunks = (int)((int)fileSize / chunkSize) + 1;
+		int maxCompressedChunkSize = LZ4_compressBound(chunkSize);
+		int compressedBuffSize = numberOfChunks * maxCompressedChunkSize;
+		outbuffer = (char*)malloc((size_t)compressedBuffSize);
 
-			outputfile.close();
-			file.close();
+
+
+		/* Init chunks data */
+		{
+			int i;
+			size_t remaining = fileSize;
+			char* in = inbuffer;
+			char* out = outbuffer;
+			for (i = 0; i<numberOfChunks; i++)
+			{
+				chunkP[i].id = i;
+				chunkP[i].origBuffer = in; in += chunkSize;
+				if ((int)remaining > chunkSize) { chunkP[i].origSize = chunkSize; remaining -= chunkSize; }
+				else { chunkP[i].origSize = (int)remaining; remaining = 0; }
+				chunkP[i].compressedBuffer = out; out += maxCompressedChunkSize;
+				chunkP[i].compressedSize = 0;
+			}
+		}
+
+		/* Fill input buffer */
+		printf("Loading %s...       \r", uncompFileName);
+		int readSize = fread(inbuffer, 1, fileSize, uncompFile);
+		fclose(uncompFile);
+
+		if (readSize != fileSize)
+		{
+			printf("\nError: problem reading file '%s' !!    \n", uncompFileName);
+			free(inbuffer);
+			free(outbuffer);
+			free(chunkP);
+			continue;
+		}
+
+		// Compression
+		for (int i = 0; i < fileSize; i++) outbuffer[i] = (char)i;     /* warmimg up memory */
+
+		for (int chunk = 0; chunk<numberOfChunks; chunk++) {
+
+			chunkP[chunk].compressedSize = LZ4_compress_fast(chunkP[chunk].origBuffer, chunkP[chunk].compressedBuffer, chunkP[chunk].origSize, maxCompressedChunkSize, 2);
+
+		}
+		int compressedFileSize = 0;
+		for (int i = 0; i<numberOfChunks; i++) {
+			compressedFileSize += chunkP[i].compressedSize;
+		}
+		char* out = outbuffer;
+		fwrite(out, 1, compressedFileSize, compFile);
+		fclose(compFile);
+		//printf("Compression finished!\n");
+
+		////////////////////////////////////////////////////////////////////////////////////
+
+		/* Swap buffers */
+		char* tmp = inbuffer;
+		inbuffer = outbuffer;
+		outbuffer = tmp;
+		fopen_s(&compFile, compFileName, "rb");
+		printf("Loading %s...       \r", compFileName);
+		readSize = fread(inbuffer, 1, compressedFileSize, compFile);
+		fclose(compFile);
+
+		if (readSize != compressedFileSize)
+		{
+			printf("\nError: problem reading file '%s' !!    \n", uncompFileName);
+			free(inbuffer);
+			free(outbuffer);
+			free(chunkP);
+			continue;
+		}
+
+		// Decompression
+		LPSYSTEMTIME start = (LPSYSTEMTIME) malloc(2*sizeof(LPSYSTEMTIME));
+		LPSYSTEMTIME end = (LPSYSTEMTIME) malloc(2*sizeof(LPSYSTEMTIME));
+
+		GetSystemTime(start);
+		for (int chunk = 0; chunk<numberOfChunks; chunk++) {
+
+			LZ4_decompress_fast(chunkP[chunk].compressedBuffer, chunkP[chunk].origBuffer, chunkP[chunk].origSize);
+
+		}
+		GetSystemTime(end);
+
+		int elapsedTime = 1000*(end->wSecond-start->wSecond) + end->wMilliseconds - start->wMilliseconds;
+		
+		// Write decompressed files
+		//fopen_s(&decompFile, decompFileName, "wb");
+		//if (!decompFile) {
+		//	printf("Couldn't open file %s!\n", decompFileName);
+		//	continue;
+		//}
+		//fwrite(outbuffer, 1, fileSize, decompFile);
+		//fclose(decompFile);
+
+		//printf("Decompression finished!\n");
+		// End of decompression
+		
+		cout << elapsedTime << endl;
+
+		// Write benchmark data to csv-file
+		ofstream benchfile;
+		benchfile.open(parentpath + "\\" + "results.csv", std::ios_base::app);
+		
+			vector<string> benchbuffer(1);
+				benchbuffer.push_back(filename);
+				benchbuffer.push_back("; ");
+				benchbuffer.push_back(to_string(elapsedTime));
+				benchbuffer.push_back("; ");
+				benchbuffer.push_back(to_string((double) compressedFileSize / (double) fileSize));
+				benchbuffer.push_back("; ");
+				benchbuffer.push_back("\n");
+
+				for (int i = 0; i < benchbuffer.size(); i++) {
+					benchfile << benchbuffer[i];
+				}
+				
+			// end of benchmark
 
 			// cleanup
-			inbuffer.clear();
-			outbuffer.clear();
+			free(inbuffer);
+			free(outbuffer);
+			benchbuffer.clear();
 
-
-		} else {
-			cout << "Could not open file " << filepaths[i] << endl;
-			file.close();
-		}
-	}
-	// TO DO: write file into zip folder, add decompression info
-	cout << "Compression complete!" << endl;
-
+		} 	
+	cout << "Lz4 complete!" << endl;
 }
 
 void* Malloc(const size_t size)
