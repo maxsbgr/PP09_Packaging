@@ -10,6 +10,7 @@
 
 #include "lz4.h"
 #include "wfLZ.h"
+#include "pithy.h"
 
 using namespace std;
 
@@ -299,7 +300,85 @@ void compressWithWFLZ(vector<string> filepaths, string parentpath) {
 }
 
 void compressWithPITHY(vector<string> filepaths, string parentpath) {
-	// TO DO
+	const char* in;
+
+	size_t compressedSize, uncompressedSize;
+	const char* uncompressed;
+	char* compressed;
+	errno_t err;
+	// compressionLevel >= 0 && compressionLevel <= 9.  Values out side this range will be clamped to this range.
+	int compressionLevel = 0;
+
+	for (unsigned int i = 0; i < filepaths.size(); i++) {
+		{
+			in = filepaths[i].c_str();
+			FILE* fh;
+			err = fopen_s(&fh, in, "rb");
+			if (fh == NULL)
+			{
+				cout << "Could not open file " << in << endl;
+				continue;
+			}
+			fseek(fh, 0, SEEK_END);
+			uncompressedSize = (size_t)ftell(fh);
+			if (uncompressedSize == 0) {
+				cout << "Empty file " << i << endl << endl;
+				continue;
+			}
+			cout << "Uncompressed size of file " << i << ": " << uncompressedSize << endl;
+			uncompressed = (char*)Malloc(uncompressedSize);
+			if (uncompressed == NULL)
+			{
+				fclose(fh);
+				cout << "Error: Allocation failed.\n" << endl;
+				continue;
+			}
+			fseek(fh, 0, SEEK_SET);
+			if (fread((char*)uncompressed, 1, uncompressedSize, fh) != uncompressedSize)
+			{
+				fclose(fh);
+				cout << "Error: File read failed.\n" << endl;
+				continue;
+			}
+			fclose(fh);
+		}
+
+		compressedSize = pithy_MaxCompressedLength(uncompressedSize);
+		compressed = (char*)Malloc(compressedSize);
+		size_t notSure = pithy_Compress(uncompressed, uncompressedSize, compressed, compressedSize, 1);
+
+		ofstream outputfile;
+		string outputfilename;
+		outputfilename = filepaths[i];
+
+		outputfilename.substr();
+
+		string filename;
+		const size_t last_slash_idx = outputfilename.rfind('\\');
+		if (std::string::npos != last_slash_idx) {
+			filename = outputfilename.substr(last_slash_idx + 1, outputfilename.length());
+		}
+
+		filename.append("_compressed.pithy");
+
+		outputfile.open(parentpath + "\\" + filename, std::ios::binary | std::ios::ate);
+		const char* temp = (char*)compressed;
+		outputfile.write(temp, compressedSize);
+
+		cout << "file " << filename << " compressed." << endl;
+		cout << "Compressed size of file " << i << ": " << compressedSize << endl;
+
+		outputfile.close();
+
+		//wfLZ_Decompress(compressed, uncompressed);
+		free(compressed);
+
+		free((char*)uncompressed);
+
+		printf("Compression Ratio: %.2f\n\n", ((float)compressedSize) / ((float)uncompressedSize));
+	}
+	// TO DO: write file into zip folder,
+	cout << "Compression complete!" << endl;
 }
 
 void compressWithSNAPPY(vector<string> filepaths, string parentpath) {
