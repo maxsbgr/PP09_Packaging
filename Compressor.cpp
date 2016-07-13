@@ -215,7 +215,7 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 		inbuffer = outbuffer;
 		outbuffer = tmp;
 		fopen_s(&compFile, compFileName, "rb");
-		printf("Loading %s...       \r", compFileName);
+		printf("Loading %s...       \n", compFileName);
 		readSize = fread(inbuffer, 1, compressedFileSize, compFile);
 		fclose(compFile);
 
@@ -254,7 +254,7 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 		//printf("Decompression finished!\n");
 		// End of decompression
 		
-		cout << elapsedTime << endl;
+		cout << "Elapsed time: " << elapsedTime << " seconds" << endl;
 
 		// Write benchmark data to csv-file
 		ofstream benchfile;
