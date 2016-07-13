@@ -16,13 +16,15 @@
 using namespace std;
 
 #ifndef NULL
-	#define NULL 0
+#define NULL 0
 #endif
 
 #define _SECOND ((int64) 10000000)
 #define _MINUTE (60 * _SECOND)
 #define _HOUR   (60 * _MINUTE)
 #define _DAY    (24 * _HOUR)
+
+boolean isBenchFilePrepared = false;
 
 struct lz4chunkParameters
 {
@@ -33,13 +35,29 @@ struct lz4chunkParameters
 	int   compressedSize;
 };
 
+void prepareBenchFile(string parentPath) {
+	if (!isBenchFilePrepared) {
+		ofstream benchfile;
+		benchfile.open(parentPath + "\\" + "results.csv", std::ios_base::app);
+		vector<string> benchbuffer(1);
+		benchbuffer.push_back("Compressed File Name;");
+		benchbuffer.push_back("Decompression Time;");
+		benchbuffer.push_back("Compression Ratio;\n");
+		for (int i = 0; i < benchbuffer.size(); i++) {
+			benchfile << benchbuffer[i];
+		}
+		benchbuffer.clear();
+		isBenchFilePrepared = true;
+	}
+}
+
 // Source: http://www.codeproject.com/Articles/2604/Browse-Folder-dialog-search-folder-and-all-sub-fol
 // with slight modifications
 void SearchFolder(string path, vector<string> *files) {
 	//Declare all needed handles     
 	WIN32_FIND_DATA FindFileData;
 	HANDLE hFind;
-	
+
 	string pathBackup;
 
 	//Make a backup of the directory the user chose         
@@ -89,7 +107,7 @@ vector<string> selectFolder(char *path) {
 	
 	BROWSEINFO bi = { 0 };
 	bi.lpszTitle = "Select folder for compression.";
-	LPITEMIDLIST pidl = SHBrowseForFolder( &bi );
+	LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
 
 	if (pidl != 0) {
 		SHGetPathFromIDList(pidl, path);
@@ -110,6 +128,10 @@ vector<string> selectFolder(char *path) {
 
 void compressWithLZ4(vector<string> filepaths, string parentpath) {
 	
+	// Header for bench file
+	vector<string> benchbuffer(1);
+	benchbuffer.push_back("--- lz4 ---;---;---;\n");
+
 	for (unsigned int i = 0; i < filepaths.size(); i++) {
 	
 		FILE* uncompFile = NULL;
@@ -118,17 +140,17 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 		const int chunkSize = 65536;
 
 		const char* uncompFileName = filepaths[i].c_str();
-			string filename;
-			const size_t last_slash_idx = filepaths[i].rfind('\\');
-			if (std::string::npos != last_slash_idx) {
-				filename = filepaths[i].substr(last_slash_idx + 1, filepaths[i].length());
-			}
-			string uncompressedFileName = filename;
-			filename.append("_compressed.lz4");
-			string compStr = parentpath + "\\" + filename;
+		string filename;
+		const size_t last_slash_idx = filepaths[i].rfind('\\');
+		if (std::string::npos != last_slash_idx) {
+			filename = filepaths[i].substr(last_slash_idx + 1, filepaths[i].length());
+		}
+		string uncompressedFileName = filename;
+		filename.append("_compressed.lz4");
+		string compStr = parentpath + "\\" + filename;
 		const char* compFileName = compStr.c_str();
 
-			string decompStr = parentpath + "\\" + uncompressedFileName;
+		string decompStr = parentpath + "\\" + uncompressedFileName;
 		const char* decompFileName = decompStr.c_str();
 		
 		char* inbuffer;
@@ -146,7 +168,7 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 		}
 		struct stat buf;
 		if (stat(uncompFileName, &buf) == 0) {
-		//	printf("Groesse der Datei: %i\n", buf.st_size);
+			//	printf("Groesse der Datei: %i\n", buf.st_size);
 		}
 		int fileSize = buf.st_size;
 		/* Alloc */
@@ -166,7 +188,7 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 			size_t remaining = fileSize;
 			char* in = inbuffer;
 			char* out = outbuffer;
-			for (i = 0; i<numberOfChunks; i++)
+			for (i = 0; i < numberOfChunks; i++)
 			{
 				chunkP[i].id = i;
 				chunkP[i].origBuffer = in; in += chunkSize;
@@ -194,13 +216,13 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 		// Compression
 		for (int i = 0; i < fileSize; i++) outbuffer[i] = (char)i;     /* warmimg up memory */
 
-		for (int chunk = 0; chunk<numberOfChunks; chunk++) {
+		for (int chunk = 0; chunk < numberOfChunks; chunk++) {
 
 			chunkP[chunk].compressedSize = LZ4_compress_fast(chunkP[chunk].origBuffer, chunkP[chunk].compressedBuffer, chunkP[chunk].origSize, maxCompressedChunkSize, 2);
 
 		}
 		int compressedFileSize = 0;
-		for (int i = 0; i<numberOfChunks; i++) {
+		for (int i = 0; i < numberOfChunks; i++) {
 			compressedFileSize += chunkP[i].compressedSize;
 		}
 		char* out = outbuffer;
@@ -229,19 +251,19 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 		}
 
 		// Decompression
-		LPSYSTEMTIME start = (LPSYSTEMTIME) malloc(2*sizeof(LPSYSTEMTIME));
-		LPSYSTEMTIME end = (LPSYSTEMTIME) malloc(2*sizeof(LPSYSTEMTIME));
+		LPSYSTEMTIME start = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
+		LPSYSTEMTIME end = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
 
 		GetSystemTime(start);
-		for (int chunk = 0; chunk<numberOfChunks; chunk++) {
+		for (int chunk = 0; chunk < numberOfChunks; chunk++) {
 
 			LZ4_decompress_fast(chunkP[chunk].compressedBuffer, chunkP[chunk].origBuffer, chunkP[chunk].origSize);
 
 		}
 		GetSystemTime(end);
 
-		int elapsedTime = 1000*(end->wSecond-start->wSecond) + end->wMilliseconds - start->wMilliseconds;
-		
+		int elapsedTime = 1000 * (end->wSecond - start->wSecond) + end->wMilliseconds - start->wMilliseconds;
+
 		// Write decompressed files
 		//fopen_s(&decompFile, decompFileName, "wb");
 		//if (!decompFile) {
@@ -253,34 +275,32 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 
 		//printf("Decompression finished!\n");
 		// End of decompression
-		
-		cout << "Elapsed time: " << elapsedTime << " seconds" << endl;
 
-		// Write benchmark data to csv-file
+		cout << "Decompression time: " << elapsedTime << " seconds" << endl;
+
 		ofstream benchfile;
 		benchfile.open(parentpath + "\\" + "results.csv", std::ios_base::app);
-		
-			vector<string> benchbuffer(1);
-				benchbuffer.push_back(filename);
-				benchbuffer.push_back("; ");
-				benchbuffer.push_back(to_string(elapsedTime));
-				benchbuffer.push_back("; ");
-				benchbuffer.push_back(to_string((double) compressedFileSize / (double) fileSize));
-				benchbuffer.push_back("; ");
-				benchbuffer.push_back("\n");
 
-				for (int i = 0; i < benchbuffer.size(); i++) {
-					benchfile << benchbuffer[i];
-				}
-				
-			// end of benchmark
+		// Write benchmark data to csv-file
+		benchbuffer.push_back(filename);
+		benchbuffer.push_back(";");
+		benchbuffer.push_back(to_string(elapsedTime) + " s");
+		benchbuffer.push_back(";");
+		benchbuffer.push_back(to_string((double)compressedFileSize / (double)fileSize));
+		benchbuffer.push_back(";");
+		benchbuffer.push_back("\n");
 
-			// cleanup
-			free(inbuffer);
-			free(outbuffer);
-			benchbuffer.clear();
+		for (int i = 0; i < benchbuffer.size(); i++) {
+			benchfile << benchbuffer[i];
+		}
+		// end of benchmark
 
-		} 	
+		// cleanup
+		free(inbuffer);
+		free(outbuffer);
+		benchbuffer.clear();
+
+	}
 	cout << "Lz4 complete!" << endl;
 }
 
@@ -293,7 +313,7 @@ void* Malloc(const size_t size)
 // Source: https://github.com/ShaneYCG/wflz/blob/master/example/main.c
 // with modifications
 void compressWithWFLZ(vector<string> filepaths, string parentpath) {
-	const char* in;
+	const char* uncompFileName;
 
 	uint32_t compressedSize, uncompressedSize;
 	uint8_t* uncompressed;
@@ -301,14 +321,18 @@ void compressWithWFLZ(vector<string> filepaths, string parentpath) {
 	uint8_t* compressed;
 	errno_t err;
 
+	// Header for bench file
+	vector<string> benchbuffer(1);
+	benchbuffer.push_back("--- wfLZ ---;---;---;\n");
+
 	for (unsigned int i = 0; i < filepaths.size(); i++) {
 		{
-			in = filepaths[i].c_str();
+			uncompFileName = filepaths[i].c_str();
 			FILE* fh;
-			err = fopen_s(&fh, in, "rb");
+			err = fopen_s(&fh, uncompFileName, "rb");
 			if (fh == NULL)
 			{
-				cout << "Could not open file " << in << endl;
+				cout << "Could not open file " << uncompFileName << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_END);
@@ -350,29 +374,49 @@ void compressWithWFLZ(vector<string> filepaths, string parentpath) {
 
 		outputfilename.substr();
 
-		string filename;
+		string compressedFileName;
 		const size_t last_slash_idx = outputfilename.rfind('\\');
 		if (std::string::npos != last_slash_idx) {
-			filename = outputfilename.substr(last_slash_idx + 1, outputfilename.length());
+			compressedFileName = outputfilename.substr(last_slash_idx + 1, outputfilename.length());
 		}
 
-		filename.append("_compressed.wfLZ");
+		compressedFileName.append("_compressed.wfLZ");
 
-		outputfile.open(parentpath + "\\" + filename, std::ios::binary | std::ios::ate);
-		const char* temp = (char*) compressed;
+		outputfile.open(parentpath + "\\" + compressedFileName, std::ios::binary | std::ios::ate);
+		const char* temp = (char*)compressed;
 		outputfile.write(temp, compressedSize);
 
-		cout << "file " << filename << " compressed." << endl;
+		cout << "file " << compressedFileName << " compressed." << endl;
 		cout << "Compressed size of file " << i << ": " << compressedSize << endl;
 
 		outputfile.close();
+		// Decompression
+		LPSYSTEMTIME start = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
+		LPSYSTEMTIME end = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
 
+		GetSystemTime(start);
 		wfLZ_Decompress(compressed, uncompressed);
+		GetSystemTime(end);
+
+		int elapsedTime = 1000 * (end->wSecond - start->wSecond) + end->wMilliseconds - start->wMilliseconds;
+
+		ofstream benchfile;
+		benchfile.open(parentpath + "\\" + "results.csv", std::ios_base::app);
+
+		// Write benchmark data to csv-file
+		benchbuffer.push_back(compressedFileName + ";");
+		benchbuffer.push_back(to_string(elapsedTime) + " s;");
+		benchbuffer.push_back(to_string((float)compressedSize / (float)uncompressedSize) + ";\n");
+
+		for (int i = 0; i < benchbuffer.size(); i++) {
+			benchfile << benchbuffer[i];
+		}
 
 		free(workMem);
 		free(compressed);
 
 		free(uncompressed);
+		benchbuffer.clear();
 
 		printf("Compression Ratio: %.2f\n\n", ((float)compressedSize) / ((float)uncompressedSize));
 	}
@@ -388,22 +432,27 @@ void compressWithSNAPPY(vector<string> filepaths, string parentpath) {
 	// TO DO
 }
 
- int main(void) {
+int main(void) {
 
 	cout << "Please select folder to compress" << endl;
 	char path[MAX_PATH];
 	vector<string> filepaths;
 	filepaths = selectFolder(path);
 
-	cout << "Folder sekected: " << path << endl << endl;
+	cout << "Folder selected: " << path << endl << endl;
 
 	cout << "Please select algorithm: " << endl << "Press key 1 for lz4" << endl <<
-		"Press key 2 for wflz" << endl << "Press key 3 for pithy" << endl << "Press key 4 for snappy" << endl <<
-		"Press key 5 for all of the above" << endl << "Press key e key to exit program" << endl ;
+		"Press key 2 for wfLZ" << endl << "Press key 3 for pithy" << endl << "Press key 4 for snappy" << endl <<
+		"Press key 5 for all of the above" << endl << "Press key e key to exit program" << endl;
+
+	// This makes the user only able to open the file in read-only mode while the program is still running
+	// Otherwise benchmark doesn't write while the file is open
+	ofstream benchfile;
+	benchfile.open((string) path + "\\" + "results.csv", std::ios_base::app);
 
 	char mode = 0;
-	
-	while(true) {
+
+	while (true) {
 
 		mode = getchar();
 
@@ -411,26 +460,33 @@ void compressWithSNAPPY(vector<string> filepaths, string parentpath) {
 		switch (mode) {
 		case '1':
 			cout << "Compressing files with lz4..." << endl;
+			prepareBenchFile(path);
 			compressWithLZ4(filepaths, path);
-			cout << "Compressing with lz4 done!" << endl;
+			cout << "Compressing with lz4 done!" << endl 
+				<< "See the results.csv file." << endl;
 			break;
 		case '2':
 			cout << "Compressing files with wflz..." << endl;
+			prepareBenchFile(path);
 			compressWithWFLZ(filepaths, path);
-			cout << "Compressing with wflz done!" << endl;
+			cout << "Compressing with wfLZ done!" << endl
+				<< "See the results.csv file." << endl;
 			break;
 		case '3':
 			cout << "Compressing files with pithy..." << endl;
+			prepareBenchFile(path);
 			compressWithPITHY(filepaths, path);
 			cout << "Compressing with pithy done!" << endl;
 			break;
 		case '4':
 			cout << "Compressing files with snappy..." << endl;
+			prepareBenchFile(path);
 			compressWithSNAPPY(filepaths, path);
 			cout << "Compressing with snappy done!" << endl;
 			break;
 		case '5':
 			cout << "Compressing files..." << endl;
+			prepareBenchFile(path);
 			compressWithLZ4(filepaths, path);
 			compressWithWFLZ(filepaths, path);
 			compressWithPITHY(filepaths, path);
