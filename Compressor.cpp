@@ -9,6 +9,11 @@
 #include <iterator>
 #include "Shlwapi.h"
 
+
+// For combining compressed file to a single zip-archive
+#include "zip.h"  // source: http://www.codeproject.com/Articles/7530/Zip-Utils-clean-elegant-simple-C-Win
+#include "unzip.h"
+
 #include "lz4.h"
 #include "wfLZ.h"
 #include "quicklz.h"
@@ -147,7 +152,7 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 		}
 		string uncompressedFileName = filename;
 		filename.append("_compressed.lz4");
-		string compStr = parentpath + "\\" + filename;
+		string compStr = parentpath + "\\compressed\\" + filename;
 		const char* compFileName = compStr.c_str();
 
 		string decompStr = parentpath + "\\" + uncompressedFileName;
@@ -301,6 +306,7 @@ void compressWithLZ4(vector<string> filepaths, string parentpath) {
 		benchbuffer.clear();
 
 	}
+	
 	cout << "Lz4 complete!" << endl;
 }
 
@@ -382,7 +388,7 @@ void compressWithWFLZ(vector<string> filepaths, string parentpath) {
 
 		compressedFileName.append("_compressed.wfLZ");
 
-		outputfile.open(parentpath + "\\" + compressedFileName, std::ios::binary | std::ios::ate);
+		outputfile.open(parentpath + "\\compressed\\" + compressedFileName, std::ios::binary | std::ios::ate);
 		const char* temp = (char*)compressed;
 		outputfile.write(temp, compressedSize);
 
@@ -430,6 +436,12 @@ void compressWithQuickLZ(vector<string> filepaths, string parentpath) {
 	uint32_t compressedSize, uncompressedSize;
 	errno_t err;
 
+	// Optional Zip File - Initialization
+	string zfstr = parentpath + "\\" + "compressedFiles.zip";
+	const TCHAR* zipfile = zfstr.c_str();
+	cout << "ZIP: " << zipfile << endl;
+	HZIP zipArchive = CreateZip(zipfile, 0, 0); // Creates new zip file
+	
 	// Header for bench file
 	vector<string> benchbuffer(1);
 	benchbuffer.push_back("--- quicklz ---;---;---;\n");
@@ -493,9 +505,12 @@ void compressWithQuickLZ(vector<string> filepaths, string parentpath) {
 		// string restored = compressedFileName; // for writing decompressed file
 		compressedFileName.append("_compressed.qlz");
 
-		outputfile.open(parentpath + "\\" + compressedFileName, std::ios::binary | std::ios::ate);
+		outputfile.open(parentpath + "\\compressed\\" + compressedFileName, std::ios::binary | std::ios::ate);
 		const char* temp = compressed;
 		outputfile.write(temp, compressedSize);
+
+		// Optional Zip File - Add file
+		ZipAdd(zipArchive, compressedFileName.c_str(), (TCHAR*) compressed, compressedSize);
 
 		cout << "file " << compressedFileName << " compressed." << endl;
 		cout << "Compressed size of file " << i << ": " << compressedSize << endl;
@@ -543,7 +558,9 @@ void compressWithQuickLZ(vector<string> filepaths, string parentpath) {
 
 		printf("Compression Ratio: %.2f\n\n", ((float)compressedSize) / ((float)uncompressedSize));
 	}
-	// TO DO: write file into zip folder,
+	// Optional Zip File - Close Archive
+	CloseZip(zipArchive);
+
 	cout << "Compression complete!" << endl;
 }
 
@@ -568,6 +585,13 @@ int main(void) {
 	// Otherwise benchmark doesn't write while the file is open
 	ofstream benchfile;
 	benchfile.open((string) path + "\\" + "results.csv", std::ios_base::app);
+
+	if (CreateDirectory(string((string)path + "\\compressed\\").c_str(), NULL) ||
+		ERROR_ALREADY_EXISTS == GetLastError()) {
+		
+	} else {
+		cout << "Failed to create output directory.";
+	}
 
 	char mode = 0;
 
@@ -615,6 +639,7 @@ int main(void) {
 		case 'e':
 		case 'E':
 			cout << "exit" << endl;
+			benchfile.close();
 			exit(0);
 			break;
 		default:
