@@ -17,6 +17,7 @@
 #include "lz4.h"
 #include "wfLZ.h"
 #include "quicklz.h"
+#include "snappy-c.h"
 
 using namespace std;
 
@@ -564,8 +565,137 @@ void compressWithQuickLZ(vector<string> filepaths, string parentpath) {
 	cout << "Compression complete!" << endl;
 }
 
+// source: https://snappy.angeloflogic.com/downloads/
 void compressWithSNAPPY(vector<string> filepaths, string parentpath) {
-	// TO DO
+	uint32_t compressedSize, uncompressedSize;
+	errno_t err;
+
+	// Optional Zip File - Initialization
+	//string zfstr = parentpath + "\\" + "compressedFiles.zip";
+	//const TCHAR* zipfile = zfstr.c_str();
+	//cout << "ZIP: " << zipfile << endl;
+	//HZIP zipArchive = CreateZip(zipfile, 0, 0); // Creates new zip file
+
+												// Header for bench file
+	vector<string> benchbuffer(1);
+	benchbuffer.push_back("--- snappy ---;---;---;\n");
+
+	for (unsigned int i = 0; i < filepaths.size(); i++) {
+
+		char* uncompressed;
+		char* compressed;
+		const char* uncompFileName;
+
+		{
+			uncompFileName = filepaths[i].c_str();
+			FILE* fh;
+			err = fopen_s(&fh, uncompFileName, "rb");
+			if (fh == NULL)
+			{
+				cout << "Could not open file " << uncompFileName << endl;
+				continue;
+			}
+			fseek(fh, 0, SEEK_END);
+			uncompressedSize = (uint32_t)ftell(fh);
+			if (uncompressedSize == 0) {
+				cout << "Empty file " << i << endl << endl;
+				continue;
+			}
+			cout << "Uncompressed size of file " << i << ": " << uncompressedSize << endl;
+			uncompressed = (char*)Malloc(uncompressedSize);
+			if (uncompressed == NULL)
+			{
+				fclose(fh);
+				cout << "Error: Allocation failed.\n" << endl;
+				continue;
+			}
+			fseek(fh, 0, SEEK_SET);
+			if (fread(uncompressed, 1, uncompressedSize, fh) != uncompressedSize)
+			{
+				fclose(fh);
+				cout << "Error: File read failed.\n" << endl;
+				continue;
+			}
+			fclose(fh);
+		}
+
+		compressedSize = snappy_max_compressed_length(uncompressedSize);
+		compressed = new char[compressedSize];
+
+		// compress file
+		snappy_status comp_status = snappy_compress(uncompressed, uncompressedSize, compressed, &compressedSize);
+
+		ofstream outputfile;
+		string outputfilename;
+		outputfilename = filepaths[i];
+
+		outputfilename.substr();
+
+		string compressedFileName;
+		const size_t last_slash_idx = outputfilename.rfind('\\');
+		if (std::string::npos != last_slash_idx) {
+			compressedFileName = outputfilename.substr(last_slash_idx + 1, outputfilename.length());
+		}
+		 string restored = compressedFileName; // for writing decompressed file
+		compressedFileName.append("_compressed.snappy");
+
+		outputfile.open(parentpath + "\\compressed\\" + compressedFileName, std::ios::binary | std::ios::ate);
+		const char* temp = compressed;
+		outputfile.write(temp, compressedSize);
+
+		// Optional Zip File - Add file
+		//ZipAdd(zipArchive, compressedFileName.c_str(), (TCHAR*)compressed, compressedSize);
+
+		cout << "file " << compressedFileName << " compressed." << endl;
+		cout << "Compressed size of file " << i << ": " << compressedSize << endl;
+
+		outputfile.close();
+		// Decompression quickLZ
+		uint32_t decompressedSize;
+		snappy_status size_status = snappy_uncompressed_length(
+			compressed, compressedSize, &decompressedSize);
+
+		char* decompressed = (char*)malloc(decompressedSize);
+
+		LPSYSTEMTIME start = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
+		LPSYSTEMTIME end = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
+
+		GetSystemTime(start);
+		snappy_status status = snappy_uncompress(compressed, compressedSize, decompressed, &decompressedSize); 
+		GetSystemTime(end);
+
+		int elapsedTime = 1000 * (end->wSecond - start->wSecond) + end->wMilliseconds - start->wMilliseconds;
+
+		/* write decompressed file*/
+		outputfile.open(parentpath + "\\" + restored, std::ios::binary | std::ios::ate);
+		temp = decompressed;
+		outputfile.write(temp, decompressedSize);
+		
+
+
+		ofstream benchfile;
+		benchfile.open(parentpath + "\\" + "results.csv", std::ios_base::app);
+
+		// Write benchmark data to csv-file
+		benchbuffer.push_back(compressedFileName + ";");
+		benchbuffer.push_back(to_string(elapsedTime) + " ms;");
+		benchbuffer.push_back(to_string((float)compressedSize / (float)uncompressedSize) + ";\n");
+
+		for (int i = 0; i < benchbuffer.size(); i++) {
+			benchfile << benchbuffer[i];
+		}
+
+		free(compressed);
+		free(decompressed);
+		free(uncompressed);
+		benchbuffer.clear();
+
+		printf("Compression Ratio: %.2f\n\n", ((float)compressedSize) / ((float)uncompressedSize));
+	}
+	// Optional Zip File - Close Archive
+	//CloseZip(zipArchive);
+
+	cout << "Compression complete!" << endl;
 }
 
 int main(void) {
