@@ -93,7 +93,7 @@ void addToBenchFile(string parentPath, bool isHeaderSet, string compMethod, stri
 	vector<string> benchbuffer(1);
 
 	// Set the sub header
-	if (isHeaderSet) {
+	if (!isHeaderSet) {
 		benchbuffer.push_back("--- " + compMethod + " ---;---;---;---;---;---;\n");
 	}		
 	// Add the process details
@@ -195,13 +195,13 @@ vector<string> selectFolder(char *path) {
 	return filePaths;
 }
 
-// Compress the chosen files with LZ4 compression method
+// Compress the chosen files with LZ4 compression method and write the process details to the bench file
 void compressWithLZ4(vector<string> filePaths, string parentPath) {
 
 	// Chunk size in bytes
 	const int chunkSize = 65536;
 	// If the sub header for this process is set
-	bool isHeaderSet = true;
+	bool isHeaderSet = false;
 
 	// Loop through the files
 	for (unsigned int i = 0; i < filePaths.size(); i++) {
@@ -351,7 +351,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 		// Write benchmark data to csv-file
 		addToBenchFile(parentPath, isHeaderSet, "LZ4", origFileName, compTime, decompTime, 
 			fileSize, compFileSize);
-		isHeaderSet = false;
+		isHeaderSet = true;
 
 		// cleanup
 		free(inBuffer);
@@ -368,46 +368,42 @@ void* Malloc(const size_t size)
 
 // Source: https://github.com/ShaneYCG/wflz/blob/master/example/main.c
 // with modifications
-void compressWithWFLZ(vector<string> filepaths, string parentPath) {
-	const char* uncompFileName;
+// Compress the chosen files with wfLZ compression method and write the process details to the bench file
+void compressWithWFLZ(vector<string> filePaths, string parentPath) {
 
-	uint32_t compressedSize, uncompressedSize;
-	uint8_t* uncompressed;
-	uint8_t* workMem;
-	uint8_t* compressed;
+	// Variables necessary for the process
+	uint32_t compSize, origSize;
+	uint8_t *origMem, *compMem, *workMem;
 	errno_t err;
 
-	// Header for bench file
-	vector<string> benchbuffer(1);
-	benchbuffer.push_back("--- wfLZ ---;---;---;\n");
+	// If the sub header for this process is set
+	bool isHeaderSet = false;
 
-	for (unsigned int i = 0; i < filepaths.size(); i++) {
+	// Loop through the files
+	for (unsigned int i = 0; i < filePaths.size(); i++) {
 		{
-			uncompFileName = filepaths[i].c_str();
+			// Read the original file and ready the memories
+			const char* origFilePath = filePaths[i].c_str();
 			FILE* fh;
-			err = fopen_s(&fh, uncompFileName, "rb");
-			if (fh == NULL)
-			{
-				cout << "Could not open file " << uncompFileName << endl;
+			err = fopen_s(&fh, origFilePath, "rb");
+			if (fh == NULL) {
+				cout << "Could not open file " << origFilePath << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_END);
-			uncompressedSize = (uint32_t)ftell(fh);
-			if (uncompressedSize == 0) {
+			origSize = (uint32_t)ftell(fh);
+			if (origSize == 0) {
 				cout << "Empty file " << i << endl << endl;
 				continue;
 			}
-
-			uncompressed = (uint8_t*)Malloc(uncompressedSize);
-			if (uncompressed == NULL)
-			{
+			origMem = (uint8_t*)Malloc(origSize);
+			if (origMem == NULL) {
 				fclose(fh);
 				cout << "Error: Allocation failed.\n" << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_SET);
-			if (fread(uncompressed, 1, uncompressedSize, fh) != uncompressedSize)
-			{
+			if (fread(origMem, 1, origSize, fh) != origSize) {
 				fclose(fh);
 				cout << "Error: File read failed.\n" << endl;
 				continue;
@@ -421,58 +417,58 @@ void compressWithWFLZ(vector<string> filepaths, string parentPath) {
 			continue;
 		}
 
-		compressed = (uint8_t*)Malloc(wfLZ_GetMaxCompressedSize(uncompressedSize));
-		compressedSize = wfLZ_CompressFast(uncompressed, uncompressedSize, compressed, workMem, 0);
+		// Compression
+		GetSystemTime(startTime);
 
-		ofstream outputfile;
-		string outputfilename;
-		outputfilename = filepaths[i];
+		compMem = (uint8_t*)Malloc(wfLZ_GetMaxCompressedSize(origSize));
+		compSize = wfLZ_CompressFast(origMem, origSize, compMem, workMem, 0);
 
-		outputfilename.substr();
+		GetSystemTime(endTime);
+		// End compression
 
-		string compressedFileName;
-		const size_t last_slash_idx = outputfilename.rfind('\\');
+		// Compression time
+		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		totalTime += compTime;
+
+		// Ready the compressed file
+		ofstream compFile;
+		string origFilePath = filePaths[i];
+
+		// Set the compressed file name
+		string compFileName;
+		const size_t last_slash_idx = filePaths[i].rfind('\\');
 		if (std::string::npos != last_slash_idx) {
-			compressedFileName = outputfilename.substr(last_slash_idx + 1, outputfilename.length());
+			compFileName = origFilePath.substr(last_slash_idx + 1, origFilePath.length());
 		}
+		// Set the original file name mid-process
+		string origFileName = compFileName;
+		compFileName.append("_compressed.wflz");
 
-		compressedFileName.append("_compressed.wfLZ");
+		// Fill the compressed file
+		compFile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compFileName, std::ios::binary | std::ios::ate);
+		const char* temp = (char*)compMem;
+		compFile.write(temp, compSize);
+		compFile.close();
 
-		outputfile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compressedFileName, std::ios::binary | std::ios::ate);
-		const char* temp = (char*)compressed;
-		outputfile.write(temp, compressedSize);
-
-		outputfile.close();
 		// Decompression
-		LPSYSTEMTIME start = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
-		LPSYSTEMTIME end = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
+		GetSystemTime(startTime);
+		wfLZ_Decompress(compMem, origMem);
+		GetSystemTime(endTime);
 
-		GetSystemTime(start);
-		wfLZ_Decompress(compressed, uncompressed);
-		GetSystemTime(end);
+		// Decompression time
+		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		totalTime += decompTime;
 
-		int elapsedTime = 1000 * (end->wSecond - start->wSecond) + end->wMilliseconds - start->wMilliseconds;
-		totalTime += elapsedTime;
+		// Add the details to the bencht file
+		addToBenchFile(parentPath, isHeaderSet, "wfLZ", origFileName, compTime, decompTime, (int)origSize, 
+			(int)compSize);
+		isHeaderSet = true;
 
-		ofstream benchfile;
-		benchfile.open(parentPath + "\\" + BENCH_FILE, std::ios_base::app);
-
-		// Write benchmark data to csv-file
-		benchbuffer.push_back(compressedFileName + ";");
-		benchbuffer.push_back(to_string(elapsedTime) + " s;");
-		benchbuffer.push_back(to_string((float)compressedSize / (float)uncompressedSize) + ";\n");
-
-		for (unsigned int i = 0; i < benchbuffer.size(); i++) {
-			benchfile << benchbuffer[i];
-		}
-
+		// Clean up
 		free(workMem);
-		free(compressed);
-
-		free(uncompressed);
-		benchbuffer.clear();
+		free(compMem);
+		free(origMem);
 	}
-	// TO DO: write file into zip folder,
 }
 
 // QuickLZ (Replacement of Pithy due to errors in code and lack of documentation)
@@ -578,9 +574,9 @@ void compressWithQuickLZ(vector<string> filepaths, string parentPath) {
 		totalTime += decompTime;
 
 		/* write decompressed file
-		outputfile.open(parentPath + "\\" + restored, std::ios::binary | std::ios::ate);
+		compFile.open(parentPath + "\\" + restored, std::ios::binary | std::ios::ate);
 		temp = decompressed;
-		outputfile.write(temp, decompressedSize);
+		compFile.write(temp, decompressedSize);
 		*/
 
 
