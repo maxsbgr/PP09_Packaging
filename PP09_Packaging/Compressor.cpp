@@ -678,12 +678,18 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 	}
 }
 
+// Do after every compression process
 void afterCompressing(string compressionMethod) {
+
+	// Message to show right after the compression
 	cout << "Compressing with " << compressionMethod << " complete! That took " << totalTime << " ms." << endl
 		<< endl << "See the " << BENCH_FILE << " file for details." << endl;
 	cout << "Do you want to open the directory? (y / n)" << endl;
 
+	// Reset the total time counter
 	totalTime = 0;
+
+	// Yes/No dialog to show the chosen folder
 	bool exit = false;
 	while (!exit) {
 		char mode = getchar();
@@ -702,19 +708,25 @@ void afterCompressing(string compressionMethod) {
 		}
 	}
 
+	// Show the algorithm choice dialog again
 	cout << endl << "Please select algorithm: " << endl << "Press key 1 for LZ4" << endl <<
 		"Press key 2 for wfLZ" << endl << "Press key 3 for QuickLZ" << endl << "Press key 4 for Snappy" << endl <<
 		"Press key 5 for all of the above" << endl << "Press key e key to exit program" << endl;
 }
 
+
 int main(void) {
 
+	// Paths of the files to compress
+	vector<string> filePaths;
+
+	// User chooses the folder whose files and subfolders to be compressed
 	cout << "Please select folder to compress" << endl;
-	vector<string> filepaths;
-	filepaths = selectFolder(PATH);
+	filePaths = selectFolder(PATH);
 
 	cout << "Folder selected: " << PATH << endl << endl;
 
+	// Show algorith choice dialog
 	cout << "Please select algorithm: " << endl << "Press key 1 for LZ4" << endl <<
 		"Press key 2 for wfLZ" << endl << "Press key 3 for QuickLZ" << endl << "Press key 4 for Snappy" << endl <<
 		"Press key 5 for all of the above" << endl << "Press key e key to exit program" << endl;
@@ -733,45 +745,44 @@ int main(void) {
 		return -1;
 	}
 
-	char mode = 0;
-
+	// User's choice
+	char choice = 0;
 	while (true) {
-
-		mode = getchar();
-
+		choice = getchar();
 		cout << endl;
-		switch (mode) {
+
+		switch (choice) {
 		case '1':
 			cout << "Compressing files with LZ4..." << endl;
 			prepareBenchFile(PATH);
-			compressWithLZ4(filepaths, PATH);
+			compressWithLZ4(filePaths, PATH);
 			afterCompressing("LZ4");
 			break;
 		case '2':
 			cout << "Compressing files with wfLZ..." << endl;
 			prepareBenchFile(PATH);
-			compressWithWFLZ(filepaths, PATH);
+			compressWithWFLZ(filePaths, PATH);
 			afterCompressing("wfLZ");
 			break;
 		case '3':
 			cout << "Compressing files with QuickLZ..." << endl;
 			prepareBenchFile(PATH);
-			compressWithQuickLZ(filepaths, PATH);
+			compressWithQuickLZ(filePaths, PATH);
 			afterCompressing("QuickLZ");
 			break;
 		case '4':
 			cout << "Compressing files with Snappy..." << endl;
 			prepareBenchFile(PATH);
-			compressWithSNAPPY(filepaths, PATH);
+			compressWithSNAPPY(filePaths, PATH);
 			afterCompressing("Snappy");
 			break;
 		case '5':
 			cout << "Compressing files..." << endl;
 			prepareBenchFile(PATH);
-			compressWithLZ4(filepaths, PATH);
-			compressWithWFLZ(filepaths, PATH);
-			compressWithQuickLZ(filepaths, PATH);
-			compressWithSNAPPY(filepaths, PATH);
+			compressWithLZ4(filePaths, PATH);
+			compressWithWFLZ(filePaths, PATH);
+			compressWithQuickLZ(filePaths, PATH);
+			compressWithSNAPPY(filePaths, PATH);
 			afterCompressing("LZ4, wfLZ, QuickLZ and Snappy");
 			break;
 		case 'e':
