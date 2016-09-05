@@ -212,10 +212,8 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 	// Loop through the files to compress
 	for (unsigned int i = 0; i < filePaths.size(); i++) {
 
-		// Variables to be used later
-		FILE* origFile = NULL;
-		FILE* compFile = NULL;
-		FILE* decompFile = NULL;
+		// Variables to be used in the process
+		FILE *origFile = NULL, *compFile = NULL, *decompFile = NULL;
 
 		const char* origFilePath = filePaths[i].c_str();
 
@@ -436,7 +434,6 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath) {
 		if (std::string::npos != last_slash_idx) {
 			compFileName = origFilePath.substr(last_slash_idx + 1, origFilePath.length());
 		}
-		// Set the original file name mid-process
 		string origFileName = compFileName;
 		compFileName.append("_compressed.wflz");
 		compFile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compFileName, std::ios::binary | std::ios::ate);
@@ -465,7 +462,7 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath) {
 	}
 }
 
-// Compress the chosen files with wfLZ compression method and write the process details to the bench file
+// Compress the chosen files with QuickLZ compression method and write the process details to the bench file
 // (Replacement of Pithy due to errors in code and lack of documentation)
 void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
 
@@ -533,7 +530,6 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
 		// Create the compressed file
 		ofstream compFile;
 		string compFilePath = filePaths[i];
-
 		string compFileName;
 		const size_t last_slash_idx = compFilePath.rfind('\\');
 		if (std::string::npos != last_slash_idx) {
@@ -577,50 +573,46 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
 }
 
 // source: https://snappy.angeloflogic.com/downloads/
-void compressWithSNAPPY(vector<string> filepaths, string parentPath) {
-	uint32_t compressedSize, uncompressedSize;
+// with modifications
+// Compress the chosen files with Snappy compression method and write the process details to the bench file
+void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
+
+	// Variables necessary for the process
+	uint32_t origSize, compSize, decompSize;
 	errno_t err;
+	char *origMem, *compMem;
+	const char* origFilePath;
 
-	// Optional Zip File - Initialization
-	//string zfstr = parentPath + "\\" + "compressedFiles.zip";
-	//const TCHAR* zipfile = zfstr.c_str();
-	//cout << "ZIP: " << zipfile << endl;
-	//HZIP zipArchive = CreateZip(zipfile, 0, 0); // Creates new zip file
+	// Whether the sub header for this process is set
+	bool isHeaderSet = false;
 
-	// Header for bench file
-	vector<string> benchbuffer(1);
-	benchbuffer.push_back("--- Snappy ---;---;---;\n");
-
-	for (unsigned int i = 0; i < filepaths.size(); i++) {
-
-		char* uncompressed;
-		char* compressed;
-		const char* uncompFileName;
+	// Loop through the files to compress
+	for (unsigned int i = 0; i < filePaths.size(); i++) {
 
 		{
-			uncompFileName = filepaths[i].c_str();
+			origFilePath = filePaths[i].c_str();
 			FILE* fh;
-			err = fopen_s(&fh, uncompFileName, "rb");
+			err = fopen_s(&fh, origFilePath, "rb");
 			if (fh == NULL)
 			{
-				cout << "Could not open file " << uncompFileName << endl;
+				cout << "Could not open file " << origFilePath << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_END);
-			uncompressedSize = (uint32_t)ftell(fh);
-			if (uncompressedSize == 0) {
-				cout << "Empty file " << i << endl << endl;
+			origSize = (uint32_t)ftell(fh);
+			if (origSize == 0) {
+				cout << "Empty file " << origFilePath << endl << endl;
 				continue;
 			}
-			uncompressed = (char*)Malloc(uncompressedSize);
-			if (uncompressed == NULL)
+			origMem = (char*)Malloc(origSize);
+			if (origMem == NULL)
 			{
 				fclose(fh);
 				cout << "Error: Allocation failed.\n" << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_SET);
-			if (fread(uncompressed, 1, uncompressedSize, fh) != uncompressedSize)
+			if (fread(origMem, 1, origSize, fh) != origSize)
 			{
 				fclose(fh);
 				cout << "Error: File read failed.\n" << endl;
@@ -629,77 +621,61 @@ void compressWithSNAPPY(vector<string> filepaths, string parentPath) {
 			fclose(fh);
 		}
 
-		compressedSize = snappy_max_compressed_length(uncompressedSize);
-		compressed = new char[compressedSize];
+		// Compression
+		GetSystemTime(startTime);
 
-		// compress file
-		snappy_status comp_status = snappy_compress(uncompressed, uncompressedSize, compressed, &compressedSize);
+		compSize = snappy_max_compressed_length(origSize);
+		compMem = new char[compSize];
+		snappy_status comp_status = snappy_compress(origMem, origSize, compMem, &compSize);
 
-		ofstream outputfile;
-		string outputfilename;
-		outputfilename = filepaths[i];
+		GetSystemTime(endTime);
+		// End compression
 
-		outputfilename.substr();
+		// Compression Time
+		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		totalTime += compTime;
 
-		string compressedFileName;
-		const size_t last_slash_idx = outputfilename.rfind('\\');
+		// Create the compressed file
+		ofstream compFile;
+		string compFilePath = filePaths[i];
+		string compFileName;
+		const size_t last_slash_idx = compFilePath.rfind('\\');
 		if (std::string::npos != last_slash_idx) {
-			compressedFileName = outputfilename.substr(last_slash_idx + 1, outputfilename.length());
+			compFileName = compFilePath.substr(last_slash_idx + 1, compFilePath.length());
 		}
-		string restored = compressedFileName; // for writing decompressed file
-		compressedFileName.append("_compressed.snappy");
+		string origFileName = compFileName;
+		compFileName.append("_compressed.snappy");
 
-		outputfile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compressedFileName, std::ios::binary | std::ios::ate);
-		const char* temp = compressed;
-		outputfile.write(temp, compressedSize);
+		compFile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compFileName, std::ios::binary | std::ios::ate);
+		const char* tempMem = compMem;
+		compFile.write(tempMem, compSize);
 
-		// Optional Zip File - Add file
-		//ZipAdd(zipArchive, compressedFileName.c_str(), (TCHAR*)compressed, compressedSize);
+		compFile.close();
 
-		outputfile.close();
-		// Decompression QuickLZ
-		uint32_t decompressedSize;
-		snappy_status size_status = snappy_uncompressed_length(
-			compressed, compressedSize, &decompressedSize);
+		// Decompression
+		GetSystemTime(startTime);
 
-		char* decompressed = (char*)malloc(decompressedSize);
+		snappy_status size_status = snappy_uncompressed_length(compMem, compSize, &decompSize);
+		char* decompMem = (char*)malloc(decompSize);
+		snappy_status status = snappy_uncompress(compMem, compSize, decompMem, &decompSize);
 
-		LPSYSTEMTIME start = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
-		LPSYSTEMTIME end = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
+		GetSystemTime(endTime);
+		// End decompression
 
-		GetSystemTime(start);
-		snappy_status status = snappy_uncompress(compressed, compressedSize, decompressed, &decompressedSize);
-		GetSystemTime(end);
+		// Decompression time
+		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		totalTime += decompTime;
 
-		int elapsedTime = 1000 * (end->wSecond - start->wSecond) + end->wMilliseconds - start->wMilliseconds;
-		totalTime += elapsedTime;
+		// Add the details to the bench file
+		addToBenchFile(parentPath, isHeaderSet, "Snappy", origFileName, compTime, decompTime, (int)origSize,
+			(int)compSize);
+		isHeaderSet = true;
 
-		/* write decompressed file*/
-		outputfile.open(parentPath + "\\" + restored, std::ios::binary | std::ios::ate);
-		temp = decompressed;
-		outputfile.write(temp, decompressedSize);
-
-
-
-		ofstream benchfile;
-		benchfile.open(parentPath + "\\" + BENCH_FILE, std::ios_base::app);
-
-		// Write benchmark data to csv-file
-		benchbuffer.push_back(compressedFileName + ";");
-		benchbuffer.push_back(to_string(elapsedTime) + " ms;");
-		benchbuffer.push_back(to_string((float)compressedSize / (float)uncompressedSize) + ";\n");
-
-		for (unsigned int i = 0; i < benchbuffer.size(); i++) {
-			benchfile << benchbuffer[i];
-		}
-
-		free(compressed);
-		free(decompressed);
-		free(uncompressed);
-		benchbuffer.clear();
+		// Clean up
+		free(compMem);
+		free(decompMem);
+		free(origMem);
 	}
-	// Optional Zip File - Close Archive
-	//CloseZip(zipArchive);
 }
 
 void afterCompressing(string compressionMethod) {
