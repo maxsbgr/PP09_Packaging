@@ -195,71 +195,100 @@ vector<string> selectFolder(char *path) {
 	return filePaths;
 }
 
+// Creates the compressed file for the given parameters and returns the original file name
+string createCompressedFile(string compFilePath, string parentPath, string extension, const char *compMem, uint32_t compSize) {
+
+	ofstream compFile;
+	string origFileName;
+	// Get the file original file name from the file path
+	const size_t last_slash_idx = compFilePath.rfind('\\');
+	if (std::string::npos != last_slash_idx) {
+		origFileName = compFilePath.substr(last_slash_idx + 1, compFilePath.length());
+	}
+	// Add the extension for the compressed file
+	string compFileName = origFileName + "_compressed." + extension;
+	compFile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compFileName, std::ios::binary | std::ios::ate);
+	compFile.write(compMem, compSize);
+	compFile.close();
+	return origFileName;
+}
+
+// Helper Malloc function
+void* Malloc(const size_t size)
+{
+	return malloc(size);
+	return malloc((size + 3)&(~0x3)); // assume sane allocators pad allocations to four bytes
+}
+
 // Compress the chosen files with LZ4 compression method and write the process details to the bench file
 void compressWithLZ4(vector<string> filePaths, string parentPath) {
 
+	// Variables necessary for the process
+	uint32_t origSize, compSize;
+	char *origMem, *compMem;
+	const char* origFilePath;
 	// Chunk size in bytes
 	const int chunkSize = 65536;
-
-	// Whether the sub header for this process is set
-	bool isHeaderSet = false;
 
 	// Optional Zip File - Initialization
 	string zfstr = parentPath + "\\" + COMPRESSED_ZIP;
 	const TCHAR* zipfile = zfstr.c_str();
-	HZIP zipArchive = CreateZip(zipfile, 0, 0); // Creates new zip file
+	HZIP zipArchive = CreateZip(zipfile, 0, 0);
+
+	// Whether the sub header for this process is set
+	bool isHeaderSet = false;
 
 	// Loop through the files to compress
 	for (unsigned int i = 0; i < filePaths.size(); i++) {
 
-		// Variables to be used in the process
-		FILE *origFile = NULL, *compFile = NULL, *decompFile = NULL;
-
-		const char* origFilePath = filePaths[i].c_str();
-
-		// Set the names and paths of the compressed and decompressed files
-		string compFileName;
-		const size_t last_slash_idx = filePaths[i].rfind('\\');
-		if (std::string::npos != last_slash_idx) {
-			compFileName = filePaths[i].substr(last_slash_idx + 1, filePaths[i].length());
+		// Read the original file
+		{
+			origFilePath = filePaths[i].c_str();
+			FILE* fh;
+			errno_t err = fopen_s(&fh, origFilePath, "rb");
+			if (fh == NULL)
+			{
+				cerr << "Error: Could not open file " << origFilePath << endl;
+				continue;
+			}
+			fseek(fh, 0, SEEK_END);
+			origSize = (uint32_t)ftell(fh);
+			if (origSize == 0) {
+				cerr << "Warning: Empty file " << origFilePath << endl;
+				continue;
+			}
+			origMem = (char*)Malloc(origSize);
+			if (origMem == NULL)
+			{
+				fclose(fh);
+				cerr << "Error: Allocation failed.\n" << endl;
+				continue;
+			}
+			fseek(fh, 0, SEEK_SET);
+			if (fread(origMem, 1, origSize, fh) != origSize)
+			{
+				fclose(fh);
+				cerr << "Error: File read failed.\n" << endl;
+				continue;
+			}
+			fclose(fh);
 		}
-		string origFileName = compFileName;
-		compFileName.append("_compressed.lz4");
-		string compStr = parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compFileName;
-		const char* compFilePath = compStr.c_str();
 
-		// Prepare the read and write buffers
-		char* inBuffer;
-		char* outBuffer;
-		int numRead = 0;
-		unsigned long totalRead = 0, totalWrote = 0;
-		int numChunks = 0;
-		fopen_s(&origFile, origFilePath, "rb");
-		fopen_s(&compFile, compFilePath, "wb");
+		// Compression
+		GetSystemTime(startTime);
 
-		if (!compFile || !origFile) {
-			printf("Couldn't open file!\n");
-			continue;
-		}
-		struct stat buf;
-		stat(origFilePath, &buf);
-		int origSize = buf.st_size;
-		// Allocate
-		struct lz4chunkParameters* chunkP;
-		chunkP = (struct lz4chunkParameters*) malloc(((origSize / (size_t)chunkSize) + 1) * sizeof(struct lz4chunkParameters));
-		inBuffer = (char*)malloc((size_t)origSize);
-		numChunks = (int)((int)origSize / chunkSize) + 1;
+		struct lz4chunkParameters *chunkP = (struct lz4chunkParameters*)
+			malloc(((origSize / (size_t)chunkSize) + 1) * sizeof(struct lz4chunkParameters));
+		int numChunks = (int)((int)origSize / chunkSize) + 1;
 		int maxCompressedChunkSize = LZ4_compressBound(chunkSize);
 		int compressedBuffSize = numChunks * maxCompressedChunkSize;
-		outBuffer = (char*)malloc((size_t)compressedBuffSize);
-
-
+		compMem = (char*)malloc((size_t)compressedBuffSize);
 
 		// Init chunks data
 		{
 			size_t remaining = origSize;
-			char* in = inBuffer;
-			char* out = outBuffer;
+			char* in = origMem;
+			char* out = compMem;
 			for (int i = 0; i < numChunks; i++)
 			{
 				chunkP[i].id = i;
@@ -271,61 +300,31 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 			}
 		}
 
-		int readSize = fread(inBuffer, 1, origSize, origFile);
-		fclose(origFile);
+		// Warmimg up memory
+		for (unsigned int i = 0; i < origSize; i++) compMem[i] = (char)i;
 
-		if (readSize != origSize)
-		{
-			printf("\nError: problem reading file '%s' !!    \n", origFilePath);
-			free(inBuffer);
-			free(outBuffer);
-			free(chunkP);
-			continue;
-		}
-		
-		// Compression
-		GetSystemTime(startTime);
-
-		for (int i = 0; i < origSize; i++) outBuffer[i] = (char)i;     // warmimg up memory
-
+		// Compress chunk by chunk
 		for (int chunk = 0; chunk < numChunks; chunk++) {
-			chunkP[chunk].compSize = LZ4_compress_fast(chunkP[chunk].origBuffer, chunkP[chunk].compBuffer, 
+			chunkP[chunk].compSize = LZ4_compress_fast(chunkP[chunk].origBuffer, chunkP[chunk].compBuffer,
 				chunkP[chunk].origSize, maxCompressedChunkSize, 2);
 		}
-		int compSize = 0;
-		for (int i = 0; i < numChunks; i++) {
-			compSize += chunkP[i].compSize;
-		}
-		char* out = outBuffer;
-		fwrite(out, 1, compSize, compFile);
-		fclose(compFile);
 
 		GetSystemTime(endTime);
 		// End compression
 
-		// Optional Zip File - Add file
-		ZipAdd(zipArchive, compFileName.c_str(), (TCHAR*)inBuffer, compSize);
-
-		// Compression time in miliseconds
+		// Compression Time
 		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += compTime;
 
-		// Swap buffers
-		char* tmp = inBuffer;
-		inBuffer = outBuffer;
-		outBuffer = tmp;
-		fopen_s(&compFile, compFilePath, "rb");
-		readSize = fread(inBuffer, 1, compSize, compFile);
-		fclose(compFile);
-
-		if (readSize != compSize)
-		{
-			printf("\nError: problem reading file '%s' !!    \n", origFilePath);
-			free(inBuffer);
-			free(outBuffer);
-			free(chunkP);
-			continue;
+		// Create the compressed file
+		compSize = 0;
+		for (int i = 0; i < numChunks; i++) {
+			compSize += chunkP[i].compSize;
 		}
+		string origFileName = createCompressedFile(filePaths[i], parentPath, "lz4", compMem, compSize);
+
+		// Optional Zip File - Add file
+		ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)origMem, compSize);
 
 		// Decompression
 		GetSystemTime(startTime);
@@ -337,29 +336,22 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 		GetSystemTime(endTime);
 		// End decompression
 
-		// Decompression time in miliseconds
+		// Decompression time
 		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += decompTime;
 
-		// Write benchmark data to csv-file
-		addToBenchFile(parentPath, isHeaderSet, "LZ4", origFileName, compTime, decompTime, 
-			origSize, compSize);
+		// Add the details to the bench file
+		addToBenchFile(parentPath, isHeaderSet, "LZ4", origFileName, compTime, decompTime, (int)origSize,
+			(int)compSize);
 		isHeaderSet = true;
 
-		// cleanup
-		free(inBuffer);
-		free(outBuffer);
+		// Clean up
+		free(compMem);
+		free(origMem);
 	}
 
 	// Optional Zip File - Close Archive
 	CloseZip(zipArchive);
-}
-
-// Helper Malloc function
-void* Malloc(const size_t size)
-{
-	return malloc(size);
-	return malloc((size + 3)&(~0x3)); // assume sane allocators pad allocations to four bytes
 }
 
 // Source: https://github.com/ShaneYCG/wflz/blob/master/example/main.c
@@ -368,40 +360,44 @@ void* Malloc(const size_t size)
 void compressWithWFLZ(vector<string> filePaths, string parentPath) {
 
 	// Variables necessary for the process
-	uint32_t compSize, origSize;
+	uint32_t origSize, compSize;
 	uint8_t *origMem, *compMem, *workMem;
-	errno_t err;
+	const char* origFilePath;
 
 	// Whether the sub header for this process is set
 	bool isHeaderSet = false;
 
 	// Loop through the files to compress
 	for (unsigned int i = 0; i < filePaths.size(); i++) {
+
+		// Read the original file
 		{
-			// Read the original file and ready the memories
-			const char* origFilePath = filePaths[i].c_str();
+			origFilePath = filePaths[i].c_str();
 			FILE* fh;
-			err = fopen_s(&fh, origFilePath, "rb");
-			if (fh == NULL) {
-				cout << "Could not open file " << origFilePath << endl;
+			errno_t err = fopen_s(&fh, origFilePath, "rb");
+			if (fh == NULL)
+			{
+				cerr << "Error: Could not open file " << origFilePath << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_END);
 			origSize = (uint32_t)ftell(fh);
 			if (origSize == 0) {
-				cout << "Empty file " << origFilePath << endl;
+				cerr << "Warning: Empty file " << origFilePath << endl;
 				continue;
 			}
 			origMem = (uint8_t*)Malloc(origSize);
-			if (origMem == NULL) {
+			if (origMem == NULL)
+			{
 				fclose(fh);
-				cout << "Error: Allocation failed.\n" << endl;
+				cerr << "Error: Allocation failed.\n" << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_SET);
-			if (fread(origMem, 1, origSize, fh) != origSize) {
+			if (fread(origMem, 1, origSize, fh) != origSize)
+			{
 				fclose(fh);
-				cout << "Error: File read failed.\n" << endl;
+				cerr << "Error: File read failed.\n" << endl;
 				continue;
 			}
 			fclose(fh);
@@ -422,41 +418,31 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath) {
 		GetSystemTime(endTime);
 		// End compression
 
-		// Compression time
+		// Compression Time
 		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += compTime;
 
 		// Create the compressed file
-		ofstream compFile;
-		string origFilePath = filePaths[i];
-		string compFileName;
-		const size_t last_slash_idx = filePaths[i].rfind('\\');
-		if (std::string::npos != last_slash_idx) {
-			compFileName = origFilePath.substr(last_slash_idx + 1, origFilePath.length());
-		}
-		string origFileName = compFileName;
-		compFileName.append("_compressed.wflz");
-		compFile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compFileName, std::ios::binary | std::ios::ate);
-		const char* temp = (char*)compMem;
-		compFile.write(temp, compSize);
-		compFile.close();
+		string origFileName = createCompressedFile(filePaths[i], parentPath, "wflz", (char*)compMem, compSize);
 
 		// Decompression
 		GetSystemTime(startTime);
+
 		wfLZ_Decompress(compMem, origMem);
+
 		GetSystemTime(endTime);
+		// End decompression
 
 		// Decompression time
 		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += decompTime;
 
 		// Add the details to the bench file
-		addToBenchFile(parentPath, isHeaderSet, "wfLZ", origFileName, compTime, decompTime, (int)origSize, 
+		addToBenchFile(parentPath, isHeaderSet, "wfLZ", origFileName, compTime, decompTime, (int)origSize,
 			(int)compSize);
 		isHeaderSet = true;
 
 		// Clean up
-		free(workMem);
 		free(compMem);
 		free(origMem);
 	}
@@ -465,10 +451,8 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath) {
 // Compress the chosen files with QuickLZ compression method and write the process details to the bench file
 // (Replacement of Pithy due to errors in code and lack of documentation)
 void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
-
 	// Variables necessary for the process
-	uint32_t compSize, origSize;
-	errno_t err;
+	uint32_t origSize, compSize;
 	char *origMem, *compMem;
 	const char* origFilePath;
 
@@ -478,44 +462,42 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
 	// Loop through the files to compress
 	for (unsigned int i = 0; i < filePaths.size(); i++) {
 
-		// Read the original file and ready the memories
+		// Read the original file
 		{
 			origFilePath = filePaths[i].c_str();
 			FILE* fh;
-			err = fopen_s(&fh, origFilePath, "rb");
+			errno_t err = fopen_s(&fh, origFilePath, "rb");
 			if (fh == NULL)
 			{
-				cout << "Could not open file " << origFilePath << endl;
+				cerr << "Error: Could not open file " << origFilePath << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_END);
 			origSize = (uint32_t)ftell(fh);
 			if (origSize == 0) {
-				cout << "Empty file " << origFilePath << endl;
+				cerr << "Warning: Empty file " << origFilePath << endl;
 				continue;
 			}
 			origMem = (char*)Malloc(origSize);
 			if (origMem == NULL)
 			{
 				fclose(fh);
-				cout << "Error: Allocation failed.\n" << endl;
+				cerr << "Error: Allocation failed.\n" << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_SET);
 			if (fread(origMem, 1, origSize, fh) != origSize)
 			{
 				fclose(fh);
-				cout << "Error: File read failed.\n" << endl;
+				cerr << "Error: File read failed.\n" << endl;
 				continue;
 			}
 			fclose(fh);
 		}
 
-
 		// Compression
 		GetSystemTime(startTime);
 
-		// Make room for the compressed file
 		qlz_state_compress* stateCompress = (qlz_state_compress *)malloc(sizeof(qlz_state_compress));
 		compMem = (char*)Malloc(origSize + 400);
 		compSize = qlz_compress(origMem, compMem, origSize, stateCompress);
@@ -523,25 +505,12 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
 		GetSystemTime(endTime);
 		// End compression
 
-		// Compression time
+		// Compression Time
 		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += compTime;
 
 		// Create the compressed file
-		ofstream compFile;
-		string compFilePath = filePaths[i];
-		string compFileName;
-		const size_t last_slash_idx = compFilePath.rfind('\\');
-		if (std::string::npos != last_slash_idx) {
-			compFileName = compFilePath.substr(last_slash_idx + 1, compFilePath.length());
-		}
-		string origFileName = compFileName;
-		compFileName.append("_compressed.qlz");
-		compFile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compFileName, std::ios::binary | std::ios::ate);
-		const char* tempMem = compMem;
-		compFile.write(tempMem, compSize);
-
-		compFile.close();
+		string origFileName = createCompressedFile(filePaths[i], parentPath, "qlz", compMem, compSize);
 
 		// Decompression
 		GetSystemTime(startTime);
@@ -550,14 +519,14 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
 		unsigned int decompSize = qlz_size_decompressed(compMem);
 		char* decompMem = (char*)malloc(decompSize);
 		decompSize = qlz_decompress(compMem, decompMem, stateDecompress);
-		
+
 		GetSystemTime(endTime);
 		// End decompression
 
 		// Decompression time
 		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += decompTime;
-		
+
 		// Add the details to the bench file
 		addToBenchFile(parentPath, isHeaderSet, "QuickLZ", origFileName, compTime, decompTime, (int)origSize,
 			(int)compSize);
@@ -567,8 +536,8 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
 		free(stateCompress);
 		free(stateDecompress);
 		free(compMem);
-		free(decompMem);
 		free(origMem);
+		free(decompMem);
 	}
 }
 
@@ -579,7 +548,6 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 
 	// Variables necessary for the process
 	uint32_t origSize, compSize, decompSize;
-	errno_t err;
 	char *origMem, *compMem;
 	const char* origFilePath;
 
@@ -589,33 +557,34 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 	// Loop through the files to compress
 	for (unsigned int i = 0; i < filePaths.size(); i++) {
 
+		// Read the original file
 		{
 			origFilePath = filePaths[i].c_str();
 			FILE* fh;
-			err = fopen_s(&fh, origFilePath, "rb");
+			errno_t err = fopen_s(&fh, origFilePath, "rb");
 			if (fh == NULL)
 			{
-				cout << "Could not open file " << origFilePath << endl;
+				cerr << "Error: Could not open file " << origFilePath << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_END);
 			origSize = (uint32_t)ftell(fh);
 			if (origSize == 0) {
-				cout << "Empty file " << origFilePath << endl << endl;
+				cerr << "Warning: Empty file " << origFilePath << endl;
 				continue;
 			}
 			origMem = (char*)Malloc(origSize);
 			if (origMem == NULL)
 			{
 				fclose(fh);
-				cout << "Error: Allocation failed.\n" << endl;
+				cerr << "Error: Allocation failed.\n" << endl;
 				continue;
 			}
 			fseek(fh, 0, SEEK_SET);
 			if (fread(origMem, 1, origSize, fh) != origSize)
 			{
 				fclose(fh);
-				cout << "Error: File read failed.\n" << endl;
+				cerr << "Error: File read failed.\n" << endl;
 				continue;
 			}
 			fclose(fh);
@@ -636,21 +605,7 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 		totalTime += compTime;
 
 		// Create the compressed file
-		ofstream compFile;
-		string compFilePath = filePaths[i];
-		string compFileName;
-		const size_t last_slash_idx = compFilePath.rfind('\\');
-		if (std::string::npos != last_slash_idx) {
-			compFileName = compFilePath.substr(last_slash_idx + 1, compFilePath.length());
-		}
-		string origFileName = compFileName;
-		compFileName.append("_compressed.snappy");
-
-		compFile.open(parentPath + "\\" + COMPRESSED_FOLDER + "\\" + compFileName, std::ios::binary | std::ios::ate);
-		const char* tempMem = compMem;
-		compFile.write(tempMem, compSize);
-
-		compFile.close();
+		string origFileName = createCompressedFile(filePaths[i], parentPath, "snappy", compMem, compSize);
 
 		// Decompression
 		GetSystemTime(startTime);
