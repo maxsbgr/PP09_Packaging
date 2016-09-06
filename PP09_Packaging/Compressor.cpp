@@ -221,7 +221,7 @@ void* Malloc(const size_t size)
 }
 
 // Compress the chosen files with LZ4 compression method and write the process details to the bench file
-void compressWithLZ4(vector<string> filePaths, string parentPath) {
+void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 
 	// Variables necessary for the process
 	uint32_t origSize, compSize;
@@ -277,12 +277,12 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 		// Compression
 		GetSystemTime(startTime);
 
-		struct lz4chunkParameters *chunkP = (struct lz4chunkParameters*)
+		struct lz4chunkParameters *chunkParams = (struct lz4chunkParameters*)
 			malloc(((origSize / (size_t)chunkSize) + 1) * sizeof(struct lz4chunkParameters));
 		int numChunks = (int)((int)origSize / chunkSize) + 1;
-		int maxCompressedChunkSize = LZ4_compressBound(chunkSize);
-		int compressedBuffSize = numChunks * maxCompressedChunkSize;
-		compMem = (char*)malloc((size_t)compressedBuffSize);
+		int maxCompChunkSize = LZ4_compressBound(chunkSize);
+		int compBuffSize = numChunks * maxCompChunkSize;
+		compMem = (char*)malloc((size_t)compBuffSize);
 
 		// Init chunks data
 		{
@@ -291,12 +291,16 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 			char* out = compMem;
 			for (int i = 0; i < numChunks; i++)
 			{
-				chunkP[i].id = i;
-				chunkP[i].origBuffer = in; in += chunkSize;
-				if ((int)remaining > chunkSize) { chunkP[i].origSize = chunkSize; remaining -= chunkSize; }
-				else { chunkP[i].origSize = (int)remaining; remaining = 0; }
-				chunkP[i].compBuffer = out; out += maxCompressedChunkSize;
-				chunkP[i].compSize = 0;
+				chunkParams[i].id = i;
+				chunkParams[i].origBuffer = in; in += chunkSize;
+				if ((int)remaining > chunkSize) { 
+					chunkParams[i].origSize = chunkSize; remaining -= chunkSize; 
+				}
+				else { 
+					chunkParams[i].origSize = (int)remaining; remaining = 0; 
+				}
+				chunkParams[i].compBuffer = out; out += maxCompChunkSize;
+				chunkParams[i].compSize = 0;
 			}
 		}
 
@@ -304,9 +308,16 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 		for (unsigned int i = 0; i < origSize; i++) compMem[i] = (char)i;
 
 		// Compress chunk by chunk
+		int speed;
+		if (isFast) {
+			speed = 10;
+		}
+		else {
+			speed = 1;
+		}
 		for (int chunk = 0; chunk < numChunks; chunk++) {
-			chunkP[chunk].compSize = LZ4_compress_fast(chunkP[chunk].origBuffer, chunkP[chunk].compBuffer,
-				chunkP[chunk].origSize, maxCompressedChunkSize, 2);
+			chunkParams[chunk].compSize = LZ4_compress_fast(chunkParams[chunk].origBuffer, chunkParams[chunk].compBuffer,
+				chunkParams[chunk].origSize, maxCompChunkSize, speed);
 		}
 
 		GetSystemTime(endTime);
@@ -319,7 +330,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 		// Create the compressed file
 		compSize = 0;
 		for (int i = 0; i < numChunks; i++) {
-			compSize += chunkP[i].compSize;
+			compSize += chunkParams[i].compSize;
 		}
 		string origFileName = createCompressedFile(filePaths[i], parentPath, "lz4", compMem, compSize);
 
@@ -330,7 +341,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 		GetSystemTime(startTime);
 
 		for (int chunk = 0; chunk < numChunks; chunk++) {
-			LZ4_decompress_fast(chunkP[chunk].compBuffer, chunkP[chunk].origBuffer, chunkP[chunk].origSize);
+			LZ4_decompress_fast(chunkParams[chunk].compBuffer, chunkParams[chunk].origBuffer, chunkParams[chunk].origSize);
 		}
 
 		GetSystemTime(endTime);
@@ -357,7 +368,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath) {
 // Source: https://github.com/ShaneYCG/wflz/blob/master/example/main.c
 // with modifications
 // Compress the chosen files with wfLZ compression method and write the process details to the bench file
-void compressWithWFLZ(vector<string> filePaths, string parentPath) {
+void compressWithWFLZ(vector<string> filePaths, string parentPath, bool isFast) {
 
 	// Variables necessary for the process
 	uint32_t origSize, compSize;
@@ -413,7 +424,12 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath) {
 		GetSystemTime(startTime);
 
 		compMem = (uint8_t*)Malloc(wfLZ_GetMaxCompressedSize(origSize));
-		compSize = wfLZ_CompressFast(origMem, origSize, compMem, workMem, 0);
+		if (isFast) {
+			compSize = wfLZ_CompressFast(origMem, origSize, compMem, workMem, 0);
+		}
+		else {
+			compSize = wfLZ_Compress(origMem, origSize, compMem, workMem, 0);
+		}
 
 		GetSystemTime(endTime);
 		// End compression
@@ -450,7 +466,7 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath) {
 
 // Compress the chosen files with QuickLZ compression method and write the process details to the bench file
 // (Replacement of Pithy due to errors in code and lack of documentation)
-void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
+void compressWithQuickLZ(vector<string> filePaths, string parentPath, bool isFast) {
 	// Variables necessary for the process
 	uint32_t origSize, compSize;
 	char *origMem, *compMem;
@@ -498,6 +514,14 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath) {
 		// Compression
 		GetSystemTime(startTime);
 
+		// Change the compression level if fast is not wanted.
+		// Default is set already set to the fastest level
+		if (!isFast) {
+			#ifdef QLZ_COMPRESSION_LEVEL
+			#undef QLZ_COMPRESSION_LEVEL
+			#endif
+			#define QLZ_COMPRESSION_LEVEL 3
+		}
 		qlz_state_compress* stateCompress = (qlz_state_compress *)malloc(sizeof(qlz_state_compress));
 		compMem = (char*)Malloc(origSize + 400);
 		compSize = qlz_compress(origMem, compMem, origSize, stateCompress);
@@ -674,12 +698,33 @@ int main(void) {
 
 	// Paths of the files to compress
 	vector<string> filePaths;
+	bool isFast;
 
 	// User chooses the folder whose files and subfolders to be compressed
 	cout << "Please select folder to compress" << endl;
 	filePaths = selectFolder(PATH);
 
 	cout << "Folder selected: " << PATH << endl << endl;
+
+	// User chooses to use the fast or normal versions of the algorithms
+	cout << "Do you want to use the fast versions of the algorithms? (y / n)" << endl <<
+		"Note: This has no effect on Snappy." << endl;
+	bool speedChosen = false;
+	while (!speedChosen) {
+		switch (getchar()) {
+		case 'Y':
+		case 'y':
+			isFast = true;
+			break;
+		case 'N':
+		case 'n':
+			isFast = false;
+			break;
+		default:
+			isFast = true;
+		}
+		speedChosen = true;
+	}
 
 	// Show algorith choice dialog
 	cout << "Please select algorithm: " << endl << "Press key 1 for LZ4" << endl <<
@@ -710,19 +755,19 @@ int main(void) {
 		case '1':
 			cout << "Compressing files with LZ4..." << endl;
 			prepareBenchFile(PATH);
-			compressWithLZ4(filePaths, PATH);
+			compressWithLZ4(filePaths, PATH, isFast);
 			afterCompressing("LZ4");
 			break;
 		case '2':
 			cout << "Compressing files with wfLZ..." << endl;
 			prepareBenchFile(PATH);
-			compressWithWFLZ(filePaths, PATH);
+			compressWithWFLZ(filePaths, PATH, isFast);
 			afterCompressing("wfLZ");
 			break;
 		case '3':
 			cout << "Compressing files with QuickLZ..." << endl;
 			prepareBenchFile(PATH);
-			compressWithQuickLZ(filePaths, PATH);
+			compressWithQuickLZ(filePaths, PATH, isFast);
 			afterCompressing("QuickLZ");
 			break;
 		case '4':
@@ -734,9 +779,9 @@ int main(void) {
 		case '5':
 			cout << "Compressing files..." << endl;
 			prepareBenchFile(PATH);
-			compressWithLZ4(filePaths, PATH);
-			compressWithWFLZ(filePaths, PATH);
-			compressWithQuickLZ(filePaths, PATH);
+			compressWithLZ4(filePaths, PATH, isFast);
+			compressWithWFLZ(filePaths, PATH, isFast);
+			compressWithQuickLZ(filePaths, PATH, isFast);
 			compressWithSNAPPY(filePaths, PATH);
 			afterCompressing("LZ4, wfLZ, QuickLZ and Snappy");
 			break;
