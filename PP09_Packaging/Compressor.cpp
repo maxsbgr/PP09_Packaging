@@ -344,7 +344,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 		string origFileName = createCompressedFile(filePaths[i], parentPath, "lz4", compMem, compSize);
 
 		// Optional Zip File - Add file
-		ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)origMem, compSize);
+		ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)compMem, compSize);
 
 		// Decompression
 		GetSystemTime(startTime);
