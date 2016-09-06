@@ -33,7 +33,7 @@ using namespace std;
 // Flag to set bench file header
 boolean isBenchFilePrepared = false;
 // Total elapsed time of compression and decompression for a compression method
-int totalTime = 0;
+uint64_t totalTime = 0;
 
 // For storing system time
 LPSYSTEMTIME startTime = (LPSYSTEMTIME)malloc(2 * sizeof(LPSYSTEMTIME));
@@ -68,8 +68,8 @@ void prepareBenchFile(string parentPath) {
 		benchbuffer.push_back("File Name;");
 		benchbuffer.push_back("Compression Time;");
 		benchbuffer.push_back("Decompression Time;");
-		benchbuffer.push_back("Size before compression;");
-		benchbuffer.push_back("Size after compression;");
+		benchbuffer.push_back("Original Size;");
+		benchbuffer.push_back("Compressed Size;");
 		benchbuffer.push_back("Compression Ratio;\n");
 
 		// Write to file
@@ -84,8 +84,8 @@ void prepareBenchFile(string parentPath) {
 }
 
 // Method to add compression and decompression info to the bench file after the process is done
-void addToBenchFile(string parentPath, bool isHeaderSet, string compMethod, string fileName, int compTime, 
-	int decompTime, int origSize, int compSize) {
+void addToBenchFile(string parentPath, bool isHeaderSet, string compMethod, string fileName, uint64_t compTime, 
+	uint64_t decompTime, uint32_t origSize, uint32_t compSize) {
 
 	// Init the bench file
 	ofstream benchfile;
@@ -101,10 +101,10 @@ void addToBenchFile(string parentPath, bool isHeaderSet, string compMethod, stri
 	benchbuffer.push_back(to_string(compTime) + " ms;");
 	benchbuffer.push_back(to_string(decompTime) + " ms;");
 	// Convert from byte to kilobyte
-	benchbuffer.push_back(to_string((int) ceil((float) origSize / 1024)) + " KB;");
-	benchbuffer.push_back(to_string((int)ceil((float)compSize / 1024)) + " KB;");
+	benchbuffer.push_back(to_string((uint32_t) ceil((double) origSize / 1024)) + " KB;");
+	benchbuffer.push_back(to_string((uint32_t) ceil((double) compSize / 1024)) + " KB;");
 
-	benchbuffer.push_back(to_string((float) compSize / (float) origSize) + ";\n");
+	benchbuffer.push_back(to_string((double) compSize / (double) origSize) + ";\n");
 
 	for (unsigned int i = 0; i < benchbuffer.size(); i++) {
 		benchfile << benchbuffer[i];
@@ -151,6 +151,7 @@ void SearchFolder(string path, vector<string> *files) {
 			and have it call itself. This will begin the whole process over in a sub directory. */
 			if ((SetCurrentDirectory(path.data())))
 			{
+				// Ignore compressed folder
 				string folder = path.substr(path.find_last_of("\\") + 1);
 				if (folder != COMPRESSED_FOLDER) {
 					SearchFolder(path, files);
@@ -158,8 +159,9 @@ void SearchFolder(string path, vector<string> *files) {
 
 			}
 			else {
-				// add filename to file-vector
+				// Add filename to file-vector
 				string file = path.substr(path.find_last_of("\\") + 1);
+				// Ignore the bench and .zip files
 				if (file != BENCH_FILE && file.substr(file.find_last_of(".")) != ".zip") {
 					files->push_back(path);
 				}
@@ -228,8 +230,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 	char *origMem, *compMem;
 	const char* origFilePath;
 	// Chunk size in bytes
-	const int chunkSize = 65536;
-
+	int chunkSize;
 	// Optional Zip File - Initialization
 	string zfstr = parentPath + "\\" + COMPRESSED_ZIP;
 	const TCHAR* zipfile = zfstr.c_str();
@@ -277,6 +278,16 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 		// Compression
 		GetSystemTime(startTime);
 
+		// Change parameters depending on the speed choice
+		int speed;
+		if (isFast) {
+			speed = 10;
+			chunkSize = 4096;
+		}
+		else {
+			speed = 1;
+			chunkSize = 65536;
+		}
 		struct lz4chunkParameters *chunkParams = (struct lz4chunkParameters*)
 			malloc(((origSize / (size_t)chunkSize) + 1) * sizeof(struct lz4chunkParameters));
 		int numChunks = (int)((int)origSize / chunkSize) + 1;
@@ -292,14 +303,18 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 			for (int i = 0; i < numChunks; i++)
 			{
 				chunkParams[i].id = i;
-				chunkParams[i].origBuffer = in; in += chunkSize;
+				chunkParams[i].origBuffer = in; 
+				in += chunkSize;
 				if ((int)remaining > chunkSize) { 
-					chunkParams[i].origSize = chunkSize; remaining -= chunkSize; 
+					chunkParams[i].origSize = chunkSize; 
+					remaining -= chunkSize; 
 				}
 				else { 
-					chunkParams[i].origSize = (int)remaining; remaining = 0; 
+					chunkParams[i].origSize = (int)remaining; 
+					remaining = 0; 
 				}
-				chunkParams[i].compBuffer = out; out += maxCompChunkSize;
+				chunkParams[i].compBuffer = out; 
+				out += maxCompChunkSize;
 				chunkParams[i].compSize = 0;
 			}
 		}
@@ -308,13 +323,6 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 		for (unsigned int i = 0; i < origSize; i++) compMem[i] = (char)i;
 
 		// Compress chunk by chunk
-		int speed;
-		if (isFast) {
-			speed = 10;
-		}
-		else {
-			speed = 1;
-		}
 		for (int chunk = 0; chunk < numChunks; chunk++) {
 			chunkParams[chunk].compSize = LZ4_compress_fast(chunkParams[chunk].origBuffer, chunkParams[chunk].compBuffer,
 				chunkParams[chunk].origSize, maxCompChunkSize, speed);
@@ -324,7 +332,8 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 		// End compression
 
 		// Compression Time
-		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		uint64_t compTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += compTime;
 
 		// Create the compressed file
@@ -348,12 +357,12 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 		// End decompression
 
 		// Decompression time
-		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += decompTime;
 
 		// Add the details to the bench file
-		addToBenchFile(parentPath, isHeaderSet, "LZ4", origFileName, compTime, decompTime, (int)origSize,
-			(int)compSize);
+		addToBenchFile(parentPath, isHeaderSet, "LZ4", origFileName, compTime, decompTime, origSize, compSize);
 		isHeaderSet = true;
 
 		// Clean up
@@ -435,7 +444,8 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath, bool isFast) 
 		// End compression
 
 		// Compression Time
-		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		uint64_t compTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute) 
+			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += compTime;
 
 		// Create the compressed file
@@ -450,12 +460,12 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath, bool isFast) 
 		// End decompression
 
 		// Decompression time
-		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;;
 		totalTime += decompTime;
 
 		// Add the details to the bench file
-		addToBenchFile(parentPath, isHeaderSet, "wfLZ", origFileName, compTime, decompTime, (int)origSize,
-			(int)compSize);
+		addToBenchFile(parentPath, isHeaderSet, "wfLZ", origFileName, compTime, decompTime, origSize, compSize);
 		isHeaderSet = true;
 
 		// Clean up
@@ -467,6 +477,7 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath, bool isFast) 
 // Compress the chosen files with QuickLZ compression method and write the process details to the bench file
 // (Replacement of Pithy due to errors in code and lack of documentation)
 void compressWithQuickLZ(vector<string> filePaths, string parentPath, bool isFast) {
+
 	// Variables necessary for the process
 	uint32_t origSize, compSize;
 	char *origMem, *compMem;
@@ -530,7 +541,8 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath, bool isFas
 		// End compression
 
 		// Compression Time
-		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		unsigned long long compTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += compTime;
 
 		// Create the compressed file
@@ -548,12 +560,12 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath, bool isFas
 		// End decompression
 
 		// Decompression time
-		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += decompTime;
 
 		// Add the details to the bench file
-		addToBenchFile(parentPath, isHeaderSet, "QuickLZ", origFileName, compTime, decompTime, (int)origSize,
-			(int)compSize);
+		addToBenchFile(parentPath, isHeaderSet, "QuickLZ", origFileName, compTime, decompTime, origSize, compSize);
 		isHeaderSet = true;
 
 		// Clean up
@@ -625,7 +637,8 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 		// End compression
 
 		// Compression Time
-		int compTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		uint64_t compTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += compTime;
 
 		// Create the compressed file
@@ -642,12 +655,12 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 		// End decompression
 
 		// Decompression time
-		int decompTime = 1000 * (endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
 		totalTime += decompTime;
 
 		// Add the details to the bench file
-		addToBenchFile(parentPath, isHeaderSet, "Snappy", origFileName, compTime, decompTime, (int)origSize,
-			(int)compSize);
+		addToBenchFile(parentPath, isHeaderSet, "Snappy", origFileName, compTime, decompTime, origSize, compSize);
 		isHeaderSet = true;
 
 		// Clean up
@@ -708,7 +721,8 @@ int main(void) {
 
 	// User chooses to use the fast or normal versions of the algorithms
 	cout << "Do you want to use the fast versions of the algorithms? (y / n)" << endl <<
-		"Note: This has no effect on Snappy." << endl;
+		"Note: This has no effect on Snappy." << endl <<
+		"Warning: Non-fast version of wfLZ is extremely slow." << endl;
 	bool speedChosen = false;
 	while (!speedChosen) {
 		switch (getchar()) {
@@ -727,7 +741,7 @@ int main(void) {
 	}
 
 	// Show algorith choice dialog
-	cout << "Please select algorithm: " << endl << "Press key 1 for LZ4" << endl <<
+	cout << endl << "Please select algorithm: " << endl << "Press key 1 for LZ4" << endl <<
 		"Press key 2 for wfLZ" << endl << "Press key 3 for QuickLZ" << endl << "Press key 4 for Snappy" << endl <<
 		"Press key 5 for all of the above" << endl << "Press key e key to exit program" << endl;
 
