@@ -66,10 +66,10 @@ void prepareBenchFile(string parentPath) {
 
 		// Set the header
 		benchbuffer.push_back("File Name;");
-		benchbuffer.push_back("Compression Time;");
-		benchbuffer.push_back("Decompression Time;");
-		benchbuffer.push_back("Original Size;");
-		benchbuffer.push_back("Compressed Size;");
+		benchbuffer.push_back("Compression Time in ms;");
+		benchbuffer.push_back("Decompression Time in us;");
+		benchbuffer.push_back("Original Size in KB;");
+		benchbuffer.push_back("Compressed Size in KB;");
 		benchbuffer.push_back("Compression Ratio;\n");
 
 		// Write to file
@@ -98,11 +98,11 @@ void addToBenchFile(string parentPath, bool isHeaderSet, string compMethod, stri
 	}		
 	// Add the process details
 	benchbuffer.push_back(fileName + ";");
-	benchbuffer.push_back(to_string(compTime) + " ms;");
-	benchbuffer.push_back(to_string(decompTime) + " ms;");
+	benchbuffer.push_back(to_string(compTime) + " ;");
+	benchbuffer.push_back(to_string(decompTime) + " ;");
 	// Convert from byte to kilobyte
-	benchbuffer.push_back(to_string((uint32_t) ceil((double) origSize / 1024)) + " KB;");
-	benchbuffer.push_back(to_string((uint32_t) ceil((double) compSize / 1024)) + " KB;");
+	benchbuffer.push_back(to_string((uint32_t) ceil((double) origSize / 1024)) + " ;");
+	benchbuffer.push_back(to_string((uint32_t) ceil((double) compSize / 1024)) + " ;");
 
 	benchbuffer.push_back(to_string((double) compSize / (double) origSize) + ";\n");
 
@@ -232,9 +232,9 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 	// Chunk size in bytes
 	int chunkSize;
 	// Optional Zip File - Initialization
-	string zfstr = parentPath + "\\" + COMPRESSED_ZIP;
-	const TCHAR* zipfile = zfstr.c_str();
-	HZIP zipArchive = CreateZip(zipfile, 0, 0);
+	//string zfstr = parentPath + "\\" + COMPRESSED_ZIP;
+	//const TCHAR* zipfile = zfstr.c_str();
+	//HZIP zipArchive = CreateZip(zipfile, 0, 0);
 
 	// Whether the sub header for this process is set
 	bool isHeaderSet = false;
@@ -344,22 +344,31 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 		string origFileName = createCompressedFile(filePaths[i], parentPath, "lz4", compMem, compSize);
 
 		// Optional Zip File - Add file
-		ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)compMem, compSize);
+		//ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)compMem, compSize);
 
 		// Decompression
-		GetSystemTime(startTime);
+		//GetSystemTime(startTime);
+		LONGLONG g_Frequency, g_start, g_end;
+		//Frequenz holen
+		if (!QueryPerformanceFrequency((LARGE_INTEGER*)&g_Frequency))
+			std::cout << "Performance Counter nicht vorhanden" << std::endl;
+		QueryPerformanceCounter((LARGE_INTEGER*)&g_start);
 
 		for (int chunk = 0; chunk < numChunks; chunk++) {
 			LZ4_decompress_fast(chunkParams[chunk].compBuffer, chunkParams[chunk].origBuffer, chunkParams[chunk].origSize);
 		}
-
-		GetSystemTime(endTime);
+		
+		QueryPerformanceCounter((LARGE_INTEGER*)&g_end);
+		double dTimeDiff = (((double)(g_end - g_start)) / ((double)g_Frequency));
+		//GetSystemTime(endTime);
 		// End decompression
 
 		// Decompression time
-		uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
-			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
-		totalTime += decompTime;
+		//uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+		//	+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		//totalTime += decompTime;
+
+		uint64_t decompTime = dTimeDiff * 1000000; // Time in mikroseconds
 
 		// Add the details to the bench file
 		addToBenchFile(parentPath, isHeaderSet, "LZ4", origFileName, compTime, decompTime, origSize, compSize);
@@ -371,7 +380,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 	}
 
 	// Optional Zip File - Close Archive
-	CloseZip(zipArchive);
+	//CloseZip(zipArchive);
 }
 
 // Source: https://github.com/ShaneYCG/wflz/blob/master/example/main.c
@@ -383,6 +392,11 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath, bool isFast) 
 	uint32_t origSize, compSize;
 	uint8_t *origMem, *compMem, *workMem;
 	const char* origFilePath;
+
+	// Optional Zip File - Initialization
+	//string zfstr = parentPath + "\\" + COMPRESSED_ZIP;
+	//const TCHAR* zipfile = zfstr.c_str();
+	//HZIP zipArchive = CreateZip(zipfile, 0, 0);
 
 	// Whether the sub header for this process is set
 	bool isHeaderSet = false;
@@ -451,18 +465,30 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath, bool isFast) 
 		// Create the compressed file
 		string origFileName = createCompressedFile(filePaths[i], parentPath, "wflz", (char*)compMem, compSize);
 
+		// Optional Zip File - Add file
+		//ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)compMem, compSize);
+
 		// Decompression
-		GetSystemTime(startTime);
+		//GetSystemTime(startTime);
+		LONGLONG g_Frequency, g_start, g_end;
+		//Frequenz holen
+		if (!QueryPerformanceFrequency((LARGE_INTEGER*)&g_Frequency))
+			std::cout << "Performance Counter nicht vorhanden" << std::endl;
+		QueryPerformanceCounter((LARGE_INTEGER*)&g_start);
 
 		wfLZ_Decompress(compMem, origMem);
 
-		GetSystemTime(endTime);
+		QueryPerformanceCounter((LARGE_INTEGER*)&g_end);
+		double dTimeDiff = (((double)(g_end - g_start)) / ((double)g_Frequency));
+		//GetSystemTime(endTime);
 		// End decompression
 
 		// Decompression time
-		uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
-			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;;
-		totalTime += decompTime;
+		//uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+		//	+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		//totalTime += decompTime;
+
+		uint64_t decompTime = dTimeDiff * 1000000; // Time in mikroseconds
 
 		// Add the details to the bench file
 		addToBenchFile(parentPath, isHeaderSet, "wfLZ", origFileName, compTime, decompTime, origSize, compSize);
@@ -472,6 +498,8 @@ void compressWithWFLZ(vector<string> filePaths, string parentPath, bool isFast) 
 		free(compMem);
 		free(origMem);
 	}
+	// Optional Zip File - Close Archive
+	//CloseZip(zipArchive);
 }
 
 // Compress the chosen files with QuickLZ compression method and write the process details to the bench file
@@ -549,20 +577,29 @@ void compressWithQuickLZ(vector<string> filePaths, string parentPath, bool isFas
 		string origFileName = createCompressedFile(filePaths[i], parentPath, "qlz", compMem, compSize);
 
 		// Decompression
-		GetSystemTime(startTime);
+		//GetSystemTime(startTime);
+		LONGLONG g_Frequency, g_start, g_end;
+		//Frequenz holen
+		if (!QueryPerformanceFrequency((LARGE_INTEGER*)&g_Frequency))
+			std::cout << "Performance Counter nicht vorhanden" << std::endl;
+		QueryPerformanceCounter((LARGE_INTEGER*)&g_start);
 
 		qlz_state_decompress *stateDecompress = (qlz_state_decompress *)malloc(sizeof(qlz_state_decompress));
 		unsigned int decompSize = qlz_size_decompressed(compMem);
 		char* decompMem = (char*)malloc(decompSize);
 		decompSize = qlz_decompress(compMem, decompMem, stateDecompress);
 
-		GetSystemTime(endTime);
+		QueryPerformanceCounter((LARGE_INTEGER*)&g_end);
+		double dTimeDiff = (((double)(g_end - g_start)) / ((double)g_Frequency));
+		//GetSystemTime(endTime);
 		// End decompression
 
 		// Decompression time
-		uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
-			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
-		totalTime += decompTime;
+		//uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+		//	+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		//totalTime += decompTime;
+
+		uint64_t decompTime = dTimeDiff * 1000000; // Time in mikroseconds
 
 		// Add the details to the bench file
 		addToBenchFile(parentPath, isHeaderSet, "QuickLZ", origFileName, compTime, decompTime, origSize, compSize);
@@ -645,20 +682,29 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 		string origFileName = createCompressedFile(filePaths[i], parentPath, "snappy", compMem, compSize);
 
 		// Decompression
-		GetSystemTime(startTime);
+		//GetSystemTime(startTime);
+		LONGLONG g_Frequency, g_start, g_end;
+		//Frequenz holen
+		if (!QueryPerformanceFrequency((LARGE_INTEGER*)&g_Frequency))
+			std::cout << "Performance Counter nicht vorhanden" << std::endl;
+		QueryPerformanceCounter((LARGE_INTEGER*)&g_start);
 
 		snappy_status size_status = snappy_uncompressed_length(compMem, compSize, &decompSize);
 		char* decompMem = (char*)malloc(decompSize);
 		snappy_status status = snappy_uncompress(compMem, compSize, decompMem, &decompSize);
 
-		GetSystemTime(endTime);
+		QueryPerformanceCounter((LARGE_INTEGER*)&g_end);
+		double dTimeDiff = (((double)(g_end - g_start)) / ((double)g_Frequency));
+		//GetSystemTime(endTime);
 		// End decompression
 
 		// Decompression time
-		uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
-			+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
-		totalTime += decompTime;
+		//uint64_t decompTime = 1000 * (60 * (60 * (endTime->wHour - startTime->wHour) + endTime->wMinute - startTime->wMinute)
+		//	+ endTime->wSecond - startTime->wSecond) + endTime->wMilliseconds - startTime->wMilliseconds;
+		//totalTime += decompTime;
 
+		uint64_t decompTime = dTimeDiff * 1000000; // Time in mikroseconds
+		
 		// Add the details to the bench file
 		addToBenchFile(parentPath, isHeaderSet, "Snappy", origFileName, compTime, decompTime, origSize, compSize);
 		isHeaderSet = true;
