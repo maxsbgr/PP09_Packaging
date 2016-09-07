@@ -229,9 +229,9 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 	// Chunk size in bytes
 	int chunkSize;
 	// Optional Zip File - Initialization
-	string zfstr = parentPath + "\\" + COMPRESSED_ZIP;
+	/*string zfstr = parentPath + "\\" + COMPRESSED_ZIP;
 	const TCHAR* zipfile = zfstr.c_str();
-	HZIP zipArchive = CreateZip(zipfile, 0, 0);
+	HZIP zipArchive = CreateZip(zipfile, 0, 0);*/
 
 	// Whether the sub header for this process is set
 	bool isHeaderSet = false;
@@ -346,7 +346,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 		string origFileName = createCompressedFile(filePaths[i], parentPath, "lz4", compMem, compSize);
 
 		 //Optional Zip File - Add file
-		ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)compMem, compSize);
+		//ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)compMem, compSize);
 
 		// Decompression
 		QueryPerformanceCounter((LARGE_INTEGER*)&g_start);
@@ -373,7 +373,7 @@ void compressWithLZ4(vector<string> filePaths, string parentPath, bool isFast) {
 	}
 
 	// Optional Zip File - Close Archive
-	CloseZip(zipArchive);
+	//CloseZip(zipArchive);
 }
 
 // Source: https://github.com/ShaneYCG/wflz/blob/master/example/main.c
@@ -602,6 +602,11 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 	// Whether the sub header for this process is set
 	bool isHeaderSet = false;
 
+	// Optional Zip File - Initialization - copy all ZIP-related code to same place in other compressWithXXX()-function for use of other algorithm
+	string zfstr = parentPath + "\\" + COMPRESSED_ZIP;
+	const TCHAR* zipfile = zfstr.c_str();
+	HZIP zipArchive = CreateZip(zipfile, 0, 0);
+
 	// Loop through the files to compress
 	for (unsigned int i = 0; i < filePaths.size(); i++) {
 
@@ -661,6 +666,9 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 		// Create the compressed file
 		string origFileName = createCompressedFile(filePaths[i], parentPath, "snappy", compMem, compSize);
 
+		//Optional Zip File - Add file
+		ZipAdd(zipArchive, origFileName.c_str(), (TCHAR*)compMem, compSize);
+
 		// Decompression
 		QueryPerformanceCounter((LARGE_INTEGER*)&g_start);
 
@@ -685,6 +693,8 @@ void compressWithSNAPPY(vector<string> filePaths, string parentPath) {
 		free(decompMem);
 		free(origMem);
 	}
+	// Optional Zip File - Close Archive
+	CloseZip(zipArchive);
 }
 
 // Do after every compression process
